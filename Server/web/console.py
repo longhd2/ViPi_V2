@@ -6,8 +6,9 @@ from fastapi import APIRouter, Body, HTTPException
 
 router = APIRouter()
 
-SUPERVISOR_CONF = "/home/server/ViPi_V2/supervisor/supervisord.conf"
-SERVER_ROOT = Path("/home/server/ViPi_V2/Server")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SUPERVISOR_CONF = str(PROJECT_ROOT / "supervisor" / "supervisord.conf")
+SERVER_ROOT = PROJECT_ROOT / "Server"
 
 
 async def _run(argv, timeout=8):

@@ -1,16 +1,7 @@
-[Unit]
-Description=ViPi V2 Voice Server
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=server
-WorkingDirectory=/home/server/ViPi_V2
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/server/ViPi_V2/.venv/bin/python -m Server.main
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
+# ViPi V2 hiện sử dụng Supervisor do install/install_server.py quản lý.
+# File này chỉ giữ lại để tham khảo, không được installer kích hoạt.
+#
+# Lý do:
+# - Không hardcode username.
+# - Không phụ thuộc username hoặc thư mục home cố định.
+# - Web Admin điều khiển trực tiếp Supervisor.

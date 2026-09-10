@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 router = APIRouter()
 
-ROOT = Path("/home/server/ViPi_V2/Server")
+ROOT = Path(__file__).resolve().parents[1]
 CONFIG_FILE = ROOT / "config" / "vipi.yaml"
 
 DEFAULT_WEATHER = {

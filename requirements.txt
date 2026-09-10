@@ -11,3 +11,5 @@ psutil==7.2.2
 PyYAML==6.0.3
 scipy==1.18.1
 silero-vad==6.2.1
+paho-mqtt>=2.1.0
+yt-dlp

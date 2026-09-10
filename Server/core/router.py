@@ -1,4 +1,5 @@
 import logging
+import time
 
 log = logging.getLogger("ViPiV2.Router")
 
@@ -32,9 +33,17 @@ class Router:
         text,
         ctx
     ):
+        # VIPI_PERF_ROUTER_V1
+        _perf_understanding_t0 = time.perf_counter()
         plan = self.understanding.resolve(
             text,
             ctx
+        )
+        _perf_understanding_ms = (time.perf_counter() - _perf_understanding_t0) * 1000.0
+        log.info(
+            "PERF UNDERSTANDING %.1fms intents=%d",
+            _perf_understanding_ms,
+            len(plan.intents),
         )
 
         if not plan.intents:
@@ -90,9 +99,16 @@ class Router:
 
                 continue
 
+            _perf_skill_t0 = time.perf_counter()
             result = await self.registry.dispatch(
                 intent,
                 ctx
+            )
+            _perf_skill_ms = (time.perf_counter() - _perf_skill_t0) * 1000.0
+            log.info(
+                "PERF SKILL %s %.1fms",
+                intent.name,
+                _perf_skill_ms,
             )
 
             if result is None:

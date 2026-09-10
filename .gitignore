@@ -60,3 +60,15 @@ Server/\[*\]
 .idea/
 .DS_Store
 Thumbs.db
+
+
+# ViPi runtime
+.env/
+*.pyc
+supervisor/*.pid
+supervisor/*.sock
+
+# Temporary local scripts
+vipi_install_perf_profiler.sh
+vipi_readme_v2001.sh
+vipi_v201_tai_lieu_day_du.sh

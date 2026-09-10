@@ -1,6 +1,7 @@
 from pathlib import Path
 
-LOG_DIR = Path("/home/server/ViPi_V2/logs")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+LOG_DIR = PROJECT_ROOT / "logs"
 
 def tail_log(name="vipi-server", lines=120):
     allowed = {"vipi-server", "vipi-web"}

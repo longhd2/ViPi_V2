@@ -165,7 +165,9 @@ class MediaManager:
         self.cache = self.root / "cache" / "media"
         self.cache.mkdir(parents=True, exist_ok=True)
 
-        self.ytdlp = "/home/server/onju-v2/env/bin/yt-dlp"
+        self.ytdlp = str(
+            Path.home() / ".env" / "bin" / "yt-dlp"
+        )
 
     async def post(self, ip, path, data=None):
         body = urlencode(data or {}).encode()

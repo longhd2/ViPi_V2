@@ -254,9 +254,13 @@ class Runtime:
         if not ip:
             return
 
+        # VIPI_PERF_RUNTIME_V1
+        _perf_total_t0 = time.perf_counter()
+        _perf_stt_t0 = time.perf_counter()
         result = await self.stt.transcribe(
             audio.astype(np.int16).tobytes()
         )
+        _perf_stt_ms = (time.perf_counter() - _perf_stt_t0) * 1000.0
 
         text = result.get("text", "").strip()
 
@@ -270,10 +274,12 @@ class Runtime:
             text,
         )
 
+        _perf_router_t0 = time.perf_counter()
         routed = await self.router.handle_text(
             text,
             ctx,
         )
+        _perf_router_ms = (time.perf_counter() - _perf_router_t0) * 1000.0
 
         intent = routed["intent"]
 
@@ -294,6 +300,7 @@ class Runtime:
             reply = routed.get("reply") or ""
             replies = [reply] if reply else []
 
+        _perf_tts_total_ms = 0.0
         for index, reply in enumerate(
             replies,
             start=1
@@ -311,6 +318,7 @@ class Runtime:
             )
 
             try:
+                _perf_tts_t0 = time.perf_counter()
                 await stream_to_device(
                     reply,
                     ip,
@@ -319,8 +327,10 @@ class Runtime:
                     volume=15,
                     fade=2,
                 )
+                _perf_tts_total_ms += (time.perf_counter() - _perf_tts_t0) * 1000.0
 
             except Exception:
+                _perf_tts_total_ms += (time.perf_counter() - _perf_tts_t0) * 1000.0
                 # One failed TTS must not prevent later replies
                 # or deferred media from executing.
                 log.exception(
@@ -367,6 +377,17 @@ class Runtime:
                 log.exception(
                     "DEFERRED EXECUTION failed"
                 )
+
+        _perf_total_ms = (time.perf_counter() - _perf_total_t0) * 1000.0
+        log.info(
+            'PERF REQUEST device=%s text="%s" STT=%.1fms ROUTER=%.1fms TTS_TOTAL=%.1fms TOTAL=%.1fms',
+            ctx.device_id,
+            text,
+            _perf_stt_ms,
+            _perf_router_ms,
+            _perf_tts_total_ms,
+            _perf_total_ms,
+        )
 
     async def run(self):
         from media.manager import media_manager

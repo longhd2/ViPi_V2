@@ -6,6 +6,7 @@ import edge_tts
 import opuslib
 
 
+import time
 log = logging.getLogger("ViPiV2")
 
 
@@ -76,10 +77,18 @@ async def _stream_once(
     first_pcm = False
     opus_packets = 0
 
+    # VIPI_PERF_TTS_V1
+    _perf_t0 = time.perf_counter()
+    _perf_tcp_ms = 0.0
+    _perf_edge_first_ms = 0.0
+    _perf_pcm_first_ms = 0.0
+    _perf_opus_first_ms = 0.0
+
     try:
         # -------------------------------------------------
         # ESP32 TCP
         # -------------------------------------------------
+        _perf_tcp_t0 = time.perf_counter()
         writer = await _open_esp32_stream(
             ip,
             port,
@@ -87,6 +96,7 @@ async def _stream_once(
             volume=volume,
             fade=fade,
         )
+        _perf_tcp_ms = (time.perf_counter() - _perf_tcp_t0) * 1000.0
 
         # -------------------------------------------------
         # FFmpeg: MP3 stream -> PCM S16LE mono 16 kHz
@@ -124,7 +134,7 @@ async def _stream_once(
         # Không save MP3 xuống disk
         # -------------------------------------------------
         async def feed_edge_audio():
-            nonlocal first_edge
+            nonlocal first_edge, _perf_edge_first_ms
 
             try:
                 async for message in communicate.stream():
@@ -139,6 +149,7 @@ async def _stream_once(
 
                     if not first_edge:
                         first_edge = True
+                        _perf_edge_first_ms = (time.perf_counter() - _perf_t0) * 1000.0
                         log.info(
                             "TTS STREAM first Edge audio chunk=%d bytes",
                             len(chunk),
@@ -179,6 +190,7 @@ async def _stream_once(
 
             if not first_pcm:
                 first_pcm = True
+                _perf_pcm_first_ms = (time.perf_counter() - _perf_t0) * 1000.0
                 log.info(
                     "TTS STREAM first PCM chunk=%d bytes",
                     len(chunk),
@@ -198,6 +210,9 @@ async def _stream_once(
                     frame,
                     frame_size,
                 )
+
+                if _perf_opus_first_ms == 0.0:
+                    _perf_opus_first_ms = (time.perf_counter() - _perf_t0) * 1000.0
 
                 writer.write(
                     len(packet).to_bytes(2, "big")
@@ -270,8 +285,18 @@ async def _stream_once(
         writer.write(b"\x00\x00")
         await writer.drain()
 
+        _perf_total_ms = (time.perf_counter() - _perf_t0) * 1000.0
         log.info(
             "TTS STREAM complete packets=%d",
+            opus_packets,
+        )
+        log.info(
+            "PERF TTS tcp=%.1fms edge_first=%.1fms pcm_first=%.1fms opus_first=%.1fms total=%.1fms packets=%d",
+            _perf_tcp_ms,
+            _perf_edge_first_ms,
+            _perf_pcm_first_ms,
+            _perf_opus_first_ms,
+            _perf_total_ms,
             opus_packets,
         )
 
