@@ -19,7 +19,7 @@ esp32:
   flash_size: 16MB
   partitions: partitions.csv
 
-  # ViPi V2 OTA slot = 0x380000 = 3,670,016 bytes.
+  # ViPi V2 OTA slot = 0x380000 = 2,621,440 bytes.
   # Keep PlatformIO size reporting aligned with partitions.csv.
   framework:
     type: esp-idf
@@ -46,7 +46,6 @@ wifi:
     ssid: "ViPi-V2-Setup"
     password: "12345678"
 
-captive_portal:
 
 external_components:
   - source:

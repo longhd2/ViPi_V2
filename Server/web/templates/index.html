@@ -81,7 +81,19 @@
           <span id="hostname" class="pill">server</span>
         </div>
 
-        <div class="info-grid">
+        <div class="version-strip">
+  <div>
+    <span>SERVER</span>
+    <b id="serverVersion">--</b>
+  </div>
+  <div>
+    <span>CLIENT LATEST</span>
+    <b id="clientLatest">--</b>
+  </div>
+  <button onclick="checkAllUpdates()">Kiểm tra cập nhật</button>
+</div>
+
+<div class="info-grid">
 
           <div>
             <span>IP LAN</span>
@@ -266,7 +278,7 @@
   · 2026
 </footer>
 
-<script src="/static/js/dashboard.js?v=20260910-2"></script>
+<script src="/static/js/dashboard.js?v=20260910-ota1"></script>
 
 </body>
 </html>

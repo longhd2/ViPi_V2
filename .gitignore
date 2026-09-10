@@ -73,3 +73,11 @@ vipi_install_perf_profiler.sh
 vipi_readme_v2001.sh
 vipi_v201_tai_lieu_day_du.sh
 supervisor/supervisord.conf
+Client/generated/
+Client/release/*.bin
+Client/release/*.elf
+Client/release/latest.json
+Client/release/manifest.json
+Client/runtime_components/vipi_audio/version_generated.h
+
+VIPI_V2_CLIENT_*_APP.bin

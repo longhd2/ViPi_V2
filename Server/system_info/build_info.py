@@ -1,35 +1,40 @@
 from __future__ import annotations
 
-import os
+import json
 import platform
 import subprocess
-from datetime import datetime
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+SERVER_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = SERVER_DIR.parent
+VERSION_FILE = PROJECT_ROOT / "VERSION"
+BUILD_FILE = SERVER_DIR / "system_info" / "build.json"
 
-VERSION = os.getenv(
-    "VIPI_SERVER_VERSION",
-    "2.0.0",
-)
 
-BUILD_TIME = os.getenv(
-    "VIPI_BUILD_TIME",
-    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-)
+def _read_version():
+    try:
+        return VERSION_FILE.read_text(
+            encoding="utf-8"
+        ).strip()
+    except Exception:
+        return "unknown"
 
-BUILD_ID = os.getenv(
-    "VIPI_BUILD_ID",
-    datetime.now().strftime("%Y%m%d-%H%M%S"),
-)
+
+def _read_build():
+    try:
+        return json.loads(
+            BUILD_FILE.read_text(encoding="utf-8")
+        )
+    except Exception:
+        return {}
 
 
 def _git(*args):
     try:
         return subprocess.check_output(
             ["git", *args],
-            cwd=BASE_DIR,
+            cwd=PROJECT_ROOT,
             stderr=subprocess.DEVNULL,
             text=True,
             timeout=2,
@@ -39,26 +44,20 @@ def _git(*args):
 
 
 def get_build_info():
-    commit = _git(
-        "rev-parse",
-        "--short",
-        "HEAD",
-    )
+    build = _read_build()
+    commit = _git("rev-parse", "--short", "HEAD")
 
-    dirty = False
-
+    dirty = None
     if commit:
-        dirty = bool(
-            _git("status", "--porcelain")
-        )
+        dirty = bool(_git("status", "--porcelain"))
 
     return {
         "product": "ViPi Server",
-        "version": VERSION,
-        "build_time": BUILD_TIME,
-        "build_id": BUILD_ID,
+        "version": _read_version(),
+        "build_time": build.get("build_time", "N/A"),
+        "build_id": build.get("build_id", "N/A"),
         "python": platform.python_version(),
-        "git_commit": commit or "N/A",
-        "git_dirty": dirty if commit else None,
+        "git_commit": commit or build.get("git_commit", "N/A"),
+        "git_dirty": dirty,
         "no_llm": True,
     }

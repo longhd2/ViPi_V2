@@ -1,0 +1,5 @@
+{
+  "channel": "stable",
+  "repository": "longhd2/ViPi-ESP32-Firmware",
+  "manifest_url": "https://raw.githubusercontent.com/longhd2/ViPi-ESP32-Firmware/main/latest.json"
+}

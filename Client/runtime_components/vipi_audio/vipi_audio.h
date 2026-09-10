@@ -50,6 +50,10 @@ class ViPiAudio : public Component {
   static esp_err_t web_save_(httpd_req_t *req);
   static esp_err_t web_find_(httpd_req_t *req);
   static esp_err_t web_status_(httpd_req_t *req);
+  static esp_err_t web_wifi_status_(httpd_req_t *req);
+  static esp_err_t web_wifi_scan_(httpd_req_t *req);
+  static esp_err_t web_wifi_connect_(httpd_req_t *req);
+  static esp_err_t web_logs_(httpd_req_t *req);
   static esp_err_t web_music_play_(httpd_req_t *req);
   static esp_err_t web_music_stop_(httpd_req_t *req);
   static esp_err_t web_ota_(httpd_req_t *req);
@@ -74,7 +78,13 @@ class ViPiAudio : public Component {
 
   bool discovery_sent_{false};
   uint32_t last_discovery_ms_{0};
+
+  // Network transition state for local system sounds.
+  bool wifi_state_initialized_{false};
+  bool wifi_was_connected_{false};
+
   bool web_started_{false};
+  uint32_t last_web_retry_ms_{0};
   httpd_handle_t web_server_{nullptr};
   std::atomic<bool> config_dirty_{false};
   std::atomic<bool> music_stop_{false};

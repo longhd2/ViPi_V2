@@ -46,6 +46,20 @@ async function refresh(){
 
     supervisorStatus.textContent=d.supervisor.output || "N/A";
 
+    const sv=document.getElementById("serverVersion");
+    const cv=document.getElementById("clientLatest");
+
+    if(sv){
+      sv.textContent=d.version?.server || "--";
+    }
+
+    if(cv){
+      cv.textContent=
+        d.version?.client_latest?.ok
+          ? d.version.client_latest.version
+          : "Không kiểm tra được";
+    }
+
     if(d.home_assistant){
       const ha = d.home_assistant;
 
@@ -91,39 +105,56 @@ async function refresh(){
       }
     }
 
+    // Lay firmware/build truc tiep tu /status cua tung Client
+    await Promise.all(d.clients.map(async c => {
+      if (!c.online || !c.ip) return;
+      try {
+        const r = await fetch(
+          "/api/client/status?ip=" + encodeURIComponent(c.ip),
+          {cache:"no-store"}
+        );
+        const x = await r.json();
+        if (x?.status?.ok) c._status = x.status;
+      } catch(e) {}
+    }));
+
     const online=d.clients.filter(x=>x.online).length;
     clientCount.textContent=online+" online";
 
     if(!d.clients.length){
       clients.innerHTML='<div class="empty">Chưa có dữ liệu Client heartbeat</div>';
     }else{
-      clients.innerHTML=d.clients.map(c=>`
-        <div class="client">
+      clients.innerHTML=d.clients.map(c=>{
+        const latest =
+          d.version?.client_latest?.version || "--";
 
-          <div>
-            <div class="client-name">
-              ${c.device_id || "unknown"}
+        const installed =
+          c._status?.firmware || c.firmware || "--";
+
+        const ip = c.ip || "";
+
+        return `
+        <div class="client client-device">
+
+          <div class="client-head">
+            <div>
+              <div class="client-name">
+                ${esc(c.device_id || "unknown")}
+              </div>
+              <small class="${c.online ? 'online' : 'offline'}">
+                ● ${c.online ? 'Online' : 'Offline'}
+                ${c.age != null ? ' · ' + c.age + ' giây trước' : ''}
+              </small>
             </div>
 
-            <small class="${c.online ? 'online' : 'offline'}">
-              ● ${c.online ? 'Online' : 'Offline'}
-              ${c.age != null ? ' · ' + c.age + ' giây trước' : ''}
-            </small>
+            <span class="client-room">
+              ${esc(c.room || "default")}
+            </span>
           </div>
 
           <div>
             <small>IP</small><br>
-            <b>${c.ip || "--"}</b>
-          </div>
-
-          <div>
-            <small>ROOM</small><br>
-            <b>${c.room || "default"}</b>
-          </div>
-
-          <div>
-            <small>MODE</small><br>
-            <b>${c.mode || "--"}</b>
+            <b>${esc(ip || "--")}</b>
           </div>
 
           <div>
@@ -131,20 +162,49 @@ async function refresh(){
             <b>${c.volume != null ? c.volume + '%' : '--'}</b>
           </div>
 
-          ${c.firmware ? `
           <div>
-            <small>FIRMWARE</small><br>
-            <b>${c.firmware}</b>
-          </div>` : ''}
+            <small>INSTALLED</small><br>
+            <b>${esc(installed)}</b>
+          </div>
 
-          ${c.build_id ? `
           <div>
+            <small>LATEST</small><br>
+            <b>${esc(latest)}</b>
+          </div>
+
+          <div class="client-build">
             <small>BUILD</small><br>
-            <b>${c.build_id}</b>
-          </div>` : ''}
+            <b>${esc(c._status?.build_id || c._status?.build || c.build_id || "--")}</b>
+          </div>
 
-        </div>
-      `).join("");
+          <div class="client-actions">
+            <button
+              onclick="openClientConfig('${esc(ip)}')">
+              Cấu hình
+            </button>
+
+            <button
+              class="client-check-update"
+              data-ip="${esc(ip)}"
+              onclick="checkClientUpdate('${esc(ip)}',this)">
+              Kiểm tra
+            </button>
+
+            <button
+              class="primary"
+              onclick="otaClient('${esc(ip)}','${esc(latest)}')">
+              Update OTA
+            </button>
+          </div>
+
+          <div
+            class="update-state"
+            data-update-ip="${esc(ip)}">
+            Chưa kiểm tra
+          </div>
+
+        </div>`;
+      }).join("");
     }
   }catch(e){
     serverBadge.textContent="● WEB ERROR";
@@ -184,3 +244,132 @@ refresh();
 loadLogs();
 setInterval(refresh,3000);
 setInterval(loadLogs,5000);
+
+
+/* ===== ViPi Firmware / OTA ===== */
+
+function esc(v){
+  return String(v ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;");
+}
+
+async function getClientUpdate(ip){
+  return await json(
+    "/api/client/status?ip=" +
+    encodeURIComponent(ip)
+  );
+}
+
+async function checkClientUpdate(ip,button){
+  if(!ip) return;
+
+  const old = button ? button.textContent : "";
+
+  if(button){
+    button.disabled=true;
+    button.textContent="Đang kiểm tra...";
+  }
+
+  try{
+    const d=await getClientUpdate(ip);
+
+    const box=document.querySelector(
+      '[data-update-ip="'+CSS.escape(ip)+'"]'
+    );
+
+    if(box){
+      if(!d.status?.ok){
+        box.textContent="Không đọc được /status";
+        box.className="update-state offline";
+      }else if(d.update_available){
+        box.textContent=
+          "Có bản mới " +
+          (d.latest?.version || "");
+        box.className="update-state update-new";
+      }else{
+        box.textContent="Đã mới nhất";
+        box.className="update-state online";
+      }
+    }
+  }catch(e){
+    alert("Không kiểm tra được Client: "+e);
+  }finally{
+    if(button){
+      button.disabled=false;
+      button.textContent=old;
+    }
+  }
+}
+
+async function otaClient(ip,version){
+  if(!ip) return;
+
+  if(!confirm(
+    "Cập nhật ESP32 "+ip+
+    " lên "+version+"?\n\n"+
+    "Không tắt nguồn trong khi OTA."
+  )) return;
+
+  const box=document.querySelector(
+    '[data-update-ip="'+CSS.escape(ip)+'"]'
+  );
+
+  if(box){
+    box.textContent="Đang tải và cập nhật OTA...";
+    box.className="update-state updating";
+  }
+
+  try{
+    const d=await json("/api/client/ota",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ip})
+    });
+
+    if(!d.ok){
+      throw new Error(d.error || "OTA thất bại");
+    }
+
+    if(box){
+      box.textContent=
+        "OTA "+d.version+
+        " hoàn tất · đang reboot";
+      box.className="update-state online";
+    }
+
+    setTimeout(refresh,8000);
+  }catch(e){
+    if(box){
+      box.textContent="OTA lỗi";
+      box.className="update-state offline";
+    }
+    alert(e.message || e);
+  }
+}
+
+async function openClientConfig(ip){
+  if(!ip) return;
+  window.open(
+    "http://"+ip+"/",
+    "_blank",
+    "noopener"
+  );
+}
+
+async function checkAllUpdates(){
+  const buttons=[
+    ...document.querySelectorAll(
+      ".client-check-update"
+    )
+  ];
+
+  for(const b of buttons){
+    await checkClientUpdate(
+      b.dataset.ip,
+      b
+    );
+  }
+}

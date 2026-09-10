@@ -58,6 +58,10 @@ async def dashboard():
         "clients": get_clients(),
         "supervisor": supervisor_status(),
         "home_assistant": await home_assistant_connection.status(),
+        "version": {
+            "server": server_version(),
+            "client_latest": await latest_client(),
+        },
     }
 
 @app.get("/api/logs")
@@ -70,3 +74,52 @@ async def control(payload: dict = Body(...)):
         str(payload.get("service", "")),
         str(payload.get("action", "")),
     )
+
+
+# ===== ViPi firmware/version management =====
+from web.services.firmware_update import (
+    server_version,
+    latest_client,
+    client_status,
+    update_client,
+    compare_versions,
+)
+
+
+@app.get("/api/version")
+async def version_info():
+    return {
+        "server": {
+            "version": server_version(),
+        },
+        "client": await latest_client(),
+    }
+
+
+@app.get("/api/client/status")
+async def api_client_status(ip: str = Query(...)):
+    latest = await latest_client()
+    installed = await client_status(ip)
+
+    result = {
+        "status": installed,
+        "latest": latest,
+        "update_available": False,
+    }
+
+    if installed.get("ok") and latest.get("ok"):
+        current = installed.get("firmware", "")
+        newest = latest.get("version", "")
+
+        result["update_available"] = compare_versions(
+            current,
+            newest,
+        )
+
+    return result
+
+
+@app.post("/api/client/ota")
+async def api_client_ota(payload: dict = Body(...)):
+    ip = str(payload.get("ip", "")).strip()
+    return await update_client(ip)

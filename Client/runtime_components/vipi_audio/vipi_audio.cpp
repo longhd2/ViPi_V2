@@ -1,4 +1,5 @@
 #include "vipi_audio.h"
+#include "version_generated.h"
 #include "vipi_diagnostics.h"
 #include "display_manager.h"
 #include "touch_manager.h"
@@ -23,6 +24,7 @@
 #include "nvs_flash.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
+#include "esp_netif.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_ota_ops.h"
@@ -33,6 +35,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 #include <cerrno>
 #include "simple_dec/impl/esp_m4a_parse.h"
 #include "audio_manager.h"
@@ -264,17 +267,48 @@ void ViPiAudio::send_discovery_() {
 // ===== END vipi_discovery_impl.inc =====
 
 
+static void vipi_play_system_sound(
+    const char *filename,
+    int volume);
+
 // ===== BEGIN vipi_lifecycle_impl.inc =====
 void ViPiAudio::loop() {
   const uint32_t now = millis();
 
-  if (!network::is_connected()) {
-    discovery_sent_ = false;
-    if (web_started_) stop_web_();
-    return;
+  // Web dashboard must also remain available while fallback AP is active.
+  // Retry slowly if HTTP port/resources are temporarily unavailable.
+  if (!web_started_ &&
+      (last_web_retry_ms_ == 0 ||
+       (uint32_t)(now - last_web_retry_ms_) >= 5000UL)) {
+    last_web_retry_ms_ = now;
+    start_web_();
   }
 
-  if (!web_started_) start_web_();
+  const bool wifi_connected = network::is_connected();
+
+  if (!wifi_state_initialized_) {
+    wifi_was_connected_ = wifi_connected;
+    wifi_state_initialized_ = true;
+  } else if (wifi_connected != wifi_was_connected_) {
+    wifi_was_connected_ = wifi_connected;
+
+    if (wifi_connected) {
+      ESP_LOGI(TAG, "WiFi connected");
+      vipi_play_system_sound(
+          "wifi_connected.wav",
+          volume_);
+    } else {
+      ESP_LOGW(TAG, "WiFi disconnected");
+      vipi_play_system_sound(
+          "disconnected.wav",
+          volume_);
+    }
+  }
+
+  if (!wifi_connected) {
+    discovery_sent_ = false;
+    return;
+  }
 
   if (config_dirty_.exchange(false)) {
     apply_multinet_config_();
@@ -297,26 +331,51 @@ static void vipi_init_sound_manager() {
   }
 }
 
-static void vipi_play_wake_sound(int volume) {
-  if (vipi_sound_manager == nullptr) {
+static void vipi_play_system_sound(
+    const char *filename,
+    int volume) {
+  if (vipi_sound_manager == nullptr || filename == nullptr) {
     return;
   }
 
   if (!vipi_audio_manager.acquire(
           ViPiAudioManager::Owner::SYSTEM,
           pdMS_TO_TICKS(2000))) {
-    ESP_LOGW(TAG, "WAKE sound: speaker busy");
+    ESP_LOGW(TAG, "SYSTEM SOUND busy: %s", filename);
     return;
   }
 
-  ESP_LOGI(TAG, "WAKE sound: wake_word_triggered.wav");
+  // System sounds use 50 percent of the current user volume.
+  int system_volume = volume / 2;
+  if (system_volume < 1) {
+    system_volume = 1;
+  }
 
-  vipi_sound_manager->play(
-      "wake_word_triggered.wav",
-      volume);
+  ESP_LOGI(
+      TAG,
+      "SYSTEM SOUND: %s volume=%d",
+      filename,
+      system_volume);
+
+  bool ok = vipi_sound_manager->play(
+      filename,
+      system_volume);
+
+  if (!ok) {
+    ESP_LOGW(
+        TAG,
+        "SYSTEM SOUND failed: %s",
+        filename);
+  }
 
   vipi_audio_manager.release(
       ViPiAudioManager::Owner::SYSTEM);
+}
+
+static void vipi_play_wake_sound(int volume) {
+  vipi_play_system_sound(
+      "wake_word_triggered.wav",
+      volume);
 }
 
 void ViPiAudio::setup() {
@@ -398,6 +457,15 @@ void ViPiAudio::setup() {
   }
 
   vipi_init_sound_manager();
+
+  // Local startup sound. Does not depend on Server or Home Assistant.
+  vipi_play_system_sound(
+      "startup.wav",
+      volume_);
+
+  wifi_was_connected_ = network::is_connected();
+  wifi_state_initialized_ = true;
+
   xTaskCreatePinnedToCore(audio_task_entry_, "vipi_audio", 12288, this, 5, nullptr, 1);
   xTaskCreatePinnedToCore(tcp_task_entry_, "vipi_tcp", 16384, this, 4, nullptr, 0);
   xTaskCreatePinnedToCore(music_task_entry_, "vipi_music", 16384, this, 4, (TaskHandle_t*)&music_task_handle_, 0);
@@ -910,233 +978,7 @@ bool ViPiAudio::save_settings_() {
 // ===== END vipi_settings_impl.inc =====
 
 
-// ===== BEGIN vipi_web_impl.inc =====
-std::string ViPiAudio::url_decode_(const std::string &s) {
-  std::string o; o.reserve(s.size());
-  for (size_t i=0;i<s.size();i++) {
-    if (s[i]=='+') o.push_back(' ');
-    else if (s[i]=='%' && i+2<s.size()) {
-      unsigned int v=0; if (sscanf(s.substr(i+1,2).c_str(),"%02x",&v)==1) { o.push_back((char)v); i+=2; }
-      else o.push_back(s[i]);
-    } else o.push_back(s[i]);
-  }
-  return o;
-}
-
-std::string ViPiAudio::form_value_(const std::string &body, const char *key) {
-  std::string k=std::string(key)+"="; size_t p=body.find(k);
-  if (p==std::string::npos) return ""; p+=k.size(); size_t e=body.find('&',p);
-  return url_decode_(body.substr(p,e==std::string::npos?std::string::npos:e-p));
-}
-
-static std::string html_escape(const std::string &s) {
-  std::string o; for(char c:s){ if(c=='&')o+="&amp;"; else if(c=='<')o+="&lt;"; else if(c=='>')o+="&gt;"; else if(c=='\"')o+="&quot;"; else o+=c; } return o;
-}
-
-esp_err_t ViPiAudio::web_root_(httpd_req_t *req) {
-  auto *self=(ViPiAudio*)req->user_ctx;
-  std::string page=R"HTML(<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><meta charset=utf-8><title>ViPi V2</title><style>body{font-family:system-ui;margin:0;background:#f5f5f7;color:#222}.w{max-width:620px;margin:auto;padding:22px}.c{background:white;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 2px 12px #0001}h2{margin:0 0 12px;color:#6536a6}label{display:block;margin:12px 0 5px;font-weight:600}input,select{box-sizing:border-box;width:100%;padding:12px;border:1px solid #bbb;border-radius:10px;font-size:16px;background:white}.check{width:auto;margin-right:8px}button{padding:12px 16px;border:0;border-radius:10px;background:#6536a6;color:white;font-weight:700;font-size:15px;margin:8px 6px 0 0}.muted{color:#666;font-size:14px}.ok{color:#087f23}</style></head><body><div class=w><div class=c><h2>ViPi V2</h2><div class=ok>● Đang hoạt động</div><div class=muted>Wi‑Fi đã kết nối. Wi‑Fi được đổi qua ViPi-Setup khi mất kết nối.</div></div><form class=c method=post action=/save><label>Tên phòng / thiết bị</label><input name=room value=")HTML";
-  page+=html_escape(self->room_); page+=R"HTML("><label>Máy chủ ViPi</label><input name=server value=")HTML";
-  page+=html_escape(self->server_ip_); page+=R"HTML(" inputmode=decimal><button type=button onclick="findServer()">Tìm máy chủ</button><div id=find class=muted></div><label>Hotword MultiNet</label><input name=wake value=")HTML";
-  page+=html_escape(self->command_); page+=R"HTML(" placeholder="V B"><label>Ngưỡng nhận (0.05–0.95)</label><input name=threshold type=number min=.05 max=.95 step=.01 value=")HTML";
-  char b[32]; snprintf(b,sizeof(b),"%.2f",self->threshold_); page+=b; page+=R"HTML("><label>Thời gian nghe sau wake (ms)</label><input name=record_ms type=number min=1000 max=30000 step=500 value=")HTML";
-  page+=std::to_string(self->wake_record_ms_); page+=R"HTML("><label>Âm lượng mặc định (1–20)</label><input name=volume type=number min=1 max=20 value=")HTML";
-  page+=std::to_string(self->volume_);
-
-  page+=R"HTML(">
-
-  <h3>Phần cứng</h3>
-
-  <label>Hardware Profile</label>
-  <select name=hardware_profile>
-    <option value=0)HTML";
-
-  if (self->hardware_profile_ == 0)
-    page+=" selected";
-
-  page+=R"HTML(>Purple Board</option>
-    <option value=1)HTML";
-
-  if (self->hardware_profile_ == 1)
-    page+=" selected";
-
-  page+=R"HTML(>Custom</option>
-  </select>
-
-  <div class=muted>
-    Purple Board dùng pin chuẩn cố định.
-    Chọn Custom để thay đổi GPIO.
-    Thay đổi phần cứng có hiệu lực sau reboot.
-  </div>
-
-  <h3>Audio GPIO</h3>
-
-  <label>MIC WS</label>
-  <input name=mic_ws type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->mic_ws_);
-
-  page+=R"HTML(">
-
-  <label>MIC BCLK</label>
-  <input name=mic_bclk type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->mic_bclk_);
-
-  page+=R"HTML(">
-
-  <label>MIC DIN</label>
-  <input name=mic_din type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->mic_din_);
-
-  page+=R"HTML(">
-
-  <label>Speaker BCLK</label>
-  <input name=spk_bclk type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->spk_bclk_);
-
-  page+=R"HTML(">
-
-  <label>Speaker LRCK / WS</label>
-  <input name=spk_ws type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->spk_ws_);
-
-  page+=R"HTML(">
-
-  <label>Speaker DOUT</label>
-  <input name=spk_dout type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->spk_dout_);
-
-  page+=R"HTML(">
-
-  <h3>LED WS2812</h3>
-
-  <label>GPIO LED</label>
-  <input name=led_pin type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->led_pin_);
-
-  page+=R"HTML(">
-
-  <label>Số LED</label>
-  <input name=led_count type=number min=1 max=300 value=")HTML";
-  page+=std::to_string(self->led_count_);
-
-  page+=R"HTML(">
-
-  <label>Độ sáng LED (%)</label>
-  <input name=led_bright type=number min=1 max=100 value=")HTML";
-  page+=std::to_string(self->led_brightness_);
-
-  page+=R"HTML(">
-
-  <label>Đảo chiều LED</label>
-  <select name=led_reverse>
-    <option value=0)HTML";
-
-  if (!self->led_reverse_)
-    page+=" selected";
-
-  page+=R"HTML(>Không</option>
-    <option value=1)HTML";
-
-  if (self->led_reverse_)
-    page+=" selected";
-
-  page+=R"HTML(>Có</option>
-  </select>
-
-  <label>LED Offset</label>
-  <input name=led_offset type=number min=0 max=299 value=")HTML";
-  page+=std::to_string(self->led_offset_);
-
-  page+=R"HTML(">
-
-  <h3>Màn hình</h3>
-
-  <label>Loại màn hình</label>
-  <select name=display_type>
-    <option value=0)HTML";
-
-  if (self->display_type_ == 0)
-    page+=" selected";
-
-  page+=R"HTML(>Không dùng</option>
-    <option value=1)HTML";
-
-  if (self->display_type_ == 1)
-    page+=" selected";
-
-  page+=R"HTML(>SSD1306 128x64 I2C</option>
-    <option value=2)HTML";
-
-  if (self->display_type_ == 2)
-    page+=" selected";
-
-  page+=R"HTML(>ST7789 SPI (sắp hỗ trợ)</option>
-  </select>
-
-  <label>OLED SDA</label>
-  <input name=display_sda type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->display_sda_);
-
-  page+=R"HTML(">
-
-  <label>OLED SCL</label>
-  <input name=display_scl type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->display_scl_);
-
-  page+=R"HTML(">
-
-  <label>OLED I2C Address</label>
-  <input name=display_addr type=number min=8 max=119 value=")HTML";
-  page+=std::to_string(self->display_address_);
-
-  page+=R"HTML(">
-  <div class=muted>60 = 0x3C, 61 = 0x3D</div>
-
-  <h3>Nút điều khiển</h3>
-
-  <label>Bật nút vật lý</label>
-  <select name=touch_enabled>
-    <option value=1)HTML";
-
-  if (self->touch_enabled_)
-    page+=" selected";
-
-  page+=R"HTML(>Có</option>
-    <option value=0)HTML";
-
-  if (!self->touch_enabled_)
-    page+=" selected";
-
-  page+=R"HTML(>Không</option>
-  </select>
-
-  <label>GPIO Volume +</label>
-  <input name=touch_up type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->touch_vol_up_);
-
-  page+=R"HTML(">
-
-  <label>GPIO Volume -</label>
-  <input name=touch_down type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->touch_vol_down_);
-
-  page+=R"HTML(">
-
-  <label>GPIO Action</label>
-  <input name=touch_action type=number min=0 max=48 value=")HTML";
-  page+=std::to_string(self->touch_action_);
-
-  page+=R"HTML(">
-
-  <br>
-  <button type=submit>Lưu cấu hình</button>
-  </form><div class=c><b>Cập nhật firmware OTA</b><p class=muted>Chọn <b>VIPI_V2_CLIENT_APP.bin</b>. Không dùng FULL.bin ở đây.</p><input id=fw type=file accept=.bin><button type=button onclick="ota()">Cập nhật OTA</button><div id=ota class=muted></div></div><div class=c><b>Wi‑Fi lần đầu / đổi router</b><p class=muted>Nếu không kết nối được Wi‑Fi, ViPi phát điểm truy cập <b>ViPi-Setup</b>. Kết nối bằng mật khẩu <b>12345678</b>, sau đó mở <b>192.168.4.1</b> để nhập Wi‑Fi mới.</p></div></div><script>async function findServer(){let e=document.getElementById('find');e.textContent='Đang tìm...';try{let r=await fetch('/find');let j=await r.json();if(j.found){document.querySelector('[name=server]').value=j.ip;e.textContent='Đã tìm thấy '+j.ip}else e.textContent='Chưa thấy server. Có thể nhập IP thủ công.'}catch(x){e.textContent='Không tìm được.'}}async function ota(){let f=document.getElementById('fw').files[0],e=document.getElementById('ota');if(!f){e.textContent='Hãy chọn file APP.bin';return}if(!f.name.endsWith('.bin')){e.textContent='File không hợp lệ';return}if(!confirm('Cập nhật '+f.name+'? Không tắt nguồn trong khi cập nhật.'))return;e.textContent='Đang tải firmware...';try{let r=await fetch('/ota',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Filename':f.name},body:f});e.textContent=await r.text();if(r.ok)e.textContent+=' Thiết bị sẽ khởi động lại.'}catch(x){e.textContent='Mất kết nối khi reboot có thể là bình thường.'}}</script></body></html>)HTML";
-  httpd_resp_set_type(req,"text/html; charset=utf-8");
-  return httpd_resp_send(req,page.c_str(),page.size());
-}
-
-
-
+// ===== BEGIN vipi_hardware_config_impl =====
 void ViPiAudio::apply_hardware_profile_() {
   if (hardware_profile_ != 0) {
     // Custom profile keeps values loaded from NVS/Web.
@@ -1281,6 +1123,717 @@ bool ViPiAudio::validate_gpio_config_(std::string &error) const {
 
   error.clear();
   return true;
+}
+
+// ===== END vipi_hardware_config_impl =====
+
+// ===== BEGIN VIPI WEB V2 =====
+// ===== BEGIN vipi_web_impl.inc =====
+
+// ------------------------------------------------------------
+// ViPi Client Web V2.0.3
+// Responsive Dashboard + Wi-Fi Manager + lightweight Live Log
+// ------------------------------------------------------------
+
+struct ViPiWebLogEntry {
+  uint32_t ms;
+  char text[112];
+};
+
+static ViPiWebLogEntry vipi_web_logs[64]{};
+static uint8_t vipi_web_log_head = 0;
+static uint8_t vipi_web_log_count = 0;
+static portMUX_TYPE vipi_web_log_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void vipi_web_event(const char *msg) {
+  if (msg == nullptr || *msg == 0) return;
+
+  ViPiWebLogEntry e{};
+  e.ms = millis();
+  snprintf(e.text, sizeof(e.text), "%s", msg);
+
+  portENTER_CRITICAL(&vipi_web_log_mux);
+  vipi_web_logs[vipi_web_log_head] = e;
+  vipi_web_log_head =
+      static_cast<uint8_t>((vipi_web_log_head + 1) % 64);
+
+  if (vipi_web_log_count < 64)
+    vipi_web_log_count++;
+
+  portEXIT_CRITICAL(&vipi_web_log_mux);
+}
+
+static std::string vipi_json_escape(const std::string &in) {
+  std::string out;
+  out.reserve(in.size() + 8);
+
+  for (char c : in) {
+    switch (c) {
+      case '\\': out += "\\\\"; break;
+      case '"':  out += "\\\""; break;
+      case '\n': out += "\\n";  break;
+      case '\r': out += "\\r";  break;
+      case '\t': out += "\\t";  break;
+      default:
+        if (static_cast<unsigned char>(c) >= 0x20)
+          out += c;
+        break;
+    }
+  }
+  return out;
+}
+
+static void vipi_wifi_info(
+    bool &connected,
+    std::string &ssid,
+    std::string &ip,
+    int &rssi) {
+
+  connected = false;
+  ssid.clear();
+  ip.clear();
+  rssi = -127;
+
+  wifi_ap_record_t ap{};
+
+  if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+    connected = true;
+    ssid =
+        reinterpret_cast<const char *>(ap.ssid);
+    rssi = ap.rssi;
+  }
+
+  esp_netif_t *netif =
+      esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+
+  if (netif != nullptr) {
+    esp_netif_ip_info_t info{};
+
+    if (esp_netif_get_ip_info(netif, &info) == ESP_OK &&
+        info.ip.addr != 0) {
+      char buf[20]{};
+      snprintf(
+          buf,
+          sizeof(buf),
+          IPSTR,
+          IP2STR(&info.ip));
+      ip = buf;
+    }
+  }
+}
+
+std::string ViPiAudio::url_decode_(const std::string &s) {
+  std::string o; o.reserve(s.size());
+  for (size_t i=0;i<s.size();i++) {
+    if (s[i]=='+') o.push_back(' ');
+    else if (s[i]=='%' && i+2<s.size()) {
+      unsigned int v=0; if (sscanf(s.substr(i+1,2).c_str(),"%02x",&v)==1) { o.push_back((char)v); i+=2; }
+      else o.push_back(s[i]);
+    } else o.push_back(s[i]);
+  }
+  return o;
+}
+
+std::string ViPiAudio::form_value_(const std::string &body, const char *key) {
+  std::string k=std::string(key)+"="; size_t p=body.find(k);
+  if (p==std::string::npos) return ""; p+=k.size(); size_t e=body.find('&',p);
+  return url_decode_(body.substr(p,e==std::string::npos?std::string::npos:e-p));
+}
+
+static std::string html_escape(const std::string &s) {
+  std::string o; for(char c:s){ if(c=='&')o+="&amp;"; else if(c=='<')o+="&lt;"; else if(c=='>')o+="&gt;"; else if(c=='\"')o+="&quot;"; else o+=c; } return o;
+}
+
+esp_err_t ViPiAudio::web_root_(httpd_req_t *req) {
+  static const char page[] = R"VIPI(
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ViPi Client</title>
+<style>
+*{box-sizing:border-box}
+:root{
+ --bg:#f3f6f5;--card:#fff;--text:#17332e;--muted:#6d7d79;
+ --pri:#087f67;--pri2:#0b9a7c;--line:#dce7e3;--good:#15803d;
+ --warn:#b45309;--bad:#b91c1c;--log:#10231f
+}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+ background:var(--bg);color:var(--text)}
+.wrap{max-width:1180px;margin:auto;padding:20px}
+.hero{background:linear-gradient(135deg,#087f67,#11a683);color:#fff;
+ border-radius:22px;padding:22px 24px;margin-bottom:16px;
+ box-shadow:0 8px 30px #0b7f6725}
+.hero-top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.hero h1{font-size:26px;margin:0 0 4px}
+.hero .sub{opacity:.88;font-size:14px}
+.online{font-size:14px;font-weight:750;background:#ffffff20;
+ padding:8px 12px;border-radius:999px;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+ padding:18px;box-shadow:0 3px 14px #00000008}
+.card h2{font-size:13px;letter-spacing:.08em;margin:0 0 14px;color:var(--muted)}
+.big{font-size:21px;font-weight:800;margin-bottom:4px;overflow-wrap:anywhere}
+.muted{font-size:13px;color:var(--muted)}
+.stat{display:flex;justify-content:space-between;gap:12px;padding:7px 0;
+ border-bottom:1px solid #edf2f0}
+.stat:last-child{border:0}
+.val{font-weight:700;text-align:right;overflow-wrap:anywhere}
+.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+button,.btn{border:0;border-radius:11px;padding:11px 14px;
+ font-weight:750;font-size:14px;cursor:pointer}
+.primary{background:var(--pri);color:white}
+.secondary{background:#e7f4f0;color:#08725e}
+.danger{background:#feecec;color:var(--bad)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.section{margin-top:16px}
+.tabs{display:flex;gap:8px;overflow:auto;padding-bottom:4px}
+.tab{background:#e7efec;color:#42534f;white-space:nowrap}
+.tab.active{background:var(--pri);color:#fff}
+.panel{display:none}.panel.active{display:block}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+label{display:block;font-size:13px;font-weight:700;margin:0 0 6px}
+input,select{width:100%;min-width:0;border:1px solid #cad8d3;border-radius:11px;
+ padding:11px 12px;font-size:15px;background:#fff;color:var(--text)}
+input:focus,select:focus{outline:2px solid #0b9a7c35;border-color:var(--pri2)}
+.group-title{font-size:16px;font-weight:800;margin:18px 0 10px}
+.wifi-list{margin-top:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.wifi-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;
+ align-items:center;padding:11px 12px;border-bottom:1px solid var(--line);
+ cursor:pointer}
+.wifi-row:last-child{border:0}.wifi-row:hover{background:#f1f8f6}
+.signal{font-size:12px;color:var(--muted)}
+.logs{background:var(--log);color:#cce4dc;border-radius:14px;padding:12px;
+ height:230px;overflow:auto;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;
+ white-space:pre-wrap;word-break:break-word}
+.logbar{display:flex;justify-content:space-between;gap:8px;align-items:center;
+ margin-bottom:10px}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+ padding:5px 9px;border-radius:999px;background:#e8f7f1;color:#08735e;font-weight:750}
+.dot{width:7px;height:7px;border-radius:50%;background:#22c55e}
+.full{grid-column:1/-1}
+details{border-top:1px solid var(--line);margin-top:15px;padding-top:12px}
+summary{font-weight:800;cursor:pointer;padding:3px 0 9px}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+ background:#17332e;color:#fff;padding:11px 16px;border-radius:12px;
+ opacity:0;pointer-events:none;transition:.2s;z-index:20;max-width:90vw}
+#toast.show{opacity:1}
+@media(max-width:860px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){
+ .wrap{padding:12px}.hero{border-radius:17px;padding:18px}
+ .hero h1{font-size:22px}.grid,.form-grid{grid-template-columns:1fr}
+ .card{padding:15px;border-radius:15px}
+ .actions button,.actions .btn{flex:1 1 auto}
+ .wifi-row{grid-template-columns:1fr auto}
+ .wifi-row .security{display:none}
+ .logs{height:190px}
+}
+
+/* ===== VIPI WEB POLISH V2 ===== */
+:root{
+  --vipi-radius:16px;
+  --vipi-border:#dce7e4;
+  --vipi-shadow:0 8px 24px rgba(22,72,65,.07);
+}
+body{
+  background:#f3f7f6 !important;
+}
+.wrap,.container,.shell,.page{
+  max-width:1180px !important;
+}
+header,.header,.hero{
+  border-radius:0 0 18px 18px !important;
+}
+.card,.panel,.box,.section{
+  border:1px solid var(--vipi-border) !important;
+  border-radius:var(--vipi-radius) !important;
+  box-shadow:var(--vipi-shadow) !important;
+}
+input,select,textarea{
+  min-height:42px !important;
+  border-radius:10px !important;
+}
+button,.btn{
+  border-radius:10px !important;
+  min-height:40px !important;
+}
+.tabs,.tabbar{
+  gap:6px !important;
+}
+.tab{
+  border-radius:9px !important;
+}
+@media(max-width:700px){
+  body{padding:0 !important;}
+  .wrap,.container,.shell,.page{
+    width:100% !important;
+    padding-left:12px !important;
+    padding-right:12px !important;
+  }
+  .card,.panel,.box,.section{
+    border-radius:14px !important;
+  }
+}
+/* ===== END VIPI WEB POLISH V2 ===== */
+
+
+/* VIPI_WEB_POLISH_FINAL */
+body{background:#f3f7f6!important}
+.wrap,.container,.shell,.page{max-width:1180px!important}
+.card,.panel,.box,.section{
+ border-radius:16px!important;
+ border:1px solid #dce7e4!important;
+ box-shadow:0 7px 22px rgba(22,72,65,.07)!important;
+}
+input,select,textarea{min-height:42px!important;border-radius:10px!important}
+button,.btn{min-height:40px!important;border-radius:10px!important}
+.tab{border-radius:9px!important}
+@media(max-width:700px){
+ .wrap,.container,.shell,.page{
+   width:100%!important;
+   padding-left:12px!important;
+   padding-right:12px!important
+ }
+ .card,.panel,.box,.section{border-radius:14px!important}
+}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hero">
+ <div class="hero-top">
+  <div>
+   <h1>ViPi Client</h1>
+   <div class="sub" id="heroSub">Đang tải thông tin thiết bị...</div>
+  </div>
+  <div class="online" id="onlineBadge">● ONLINE</div>
+ </div>
+</div>
+
+<div class="grid">
+ <div class="card">
+  <h2>WI-FI</h2>
+  <div class="big" id="wifiName">--</div>
+  <div class="muted" id="wifiQuality">Đang kiểm tra...</div>
+  <div class="stat"><span>IP</span><span class="val" id="wifiIp">--</span></div>
+  <div class="stat"><span>RSSI</span><span class="val" id="wifiRssi">--</span></div>
+  <div class="actions"><button class="secondary" onclick="openWifi()">Đổi Wi-Fi</button></div>
+ </div>
+
+ <div class="card">
+  <h2>VIPI SERVER</h2>
+  <div class="big" id="serverIp">--</div>
+  <div class="muted">Máy chủ trung tâm</div>
+  <div class="stat"><span>Phòng</span><span class="val" id="roomText">--</span></div>
+  <div class="stat"><span>Wake word</span><span class="val" id="wakeText">--</span></div>
+  <div class="actions"><button class="secondary" onclick="findServer()">Tìm Server</button></div>
+ </div>
+
+ <div class="card">
+  <h2>FIRMWARE</h2>
+  <div class="big">v<span id="fwVersion">--</span></div>
+  <div class="muted" id="buildId">Build --</div>
+  <div class="stat"><span>Latest</span><span class="val" id="latestVersion">--</span></div>
+  <div class="stat"><span>Uptime</span><span class="val" id="uptime">--</span></div>
+ </div>
+</div>
+
+<div class="section card">
+ <div class="tabs">
+  <button class="tab active" data-tab="assistant">Trợ lý</button>
+  <button class="tab" data-tab="wifi">Wi-Fi</button>
+  <button class="tab" data-tab="audio">Âm thanh</button>
+  <button class="tab" data-tab="hardware">Phần cứng</button>
+  <button class="tab" data-tab="firmware">Firmware</button>
+  <button class="tab" data-tab="logs">Live Log</button>
+ </div>
+
+ <form id="cfg" method="post" action="/save">
+  <div id="assistant" class="panel active">
+   <div class="group-title">Cấu hình trợ lý</div>
+   <div class="form-grid">
+    <div><label>Tên phòng / thiết bị</label><input name="room"></div>
+    <div><label>Máy chủ ViPi</label><input name="server" inputmode="decimal"></div>
+    <div><label>Wake word MultiNet</label><input name="wake"></div>
+    <div><label>Ngưỡng nhận</label><input name="threshold" type="number" min=".05" max=".95" step=".01"></div>
+    <div><label>Thời gian nghe sau wake (ms)</label><input name="record_ms" type="number" min="1000" max="30000" step="500"></div>
+    <div><label>Âm lượng mặc định (1–20)</label><input name="volume" type="number" min="1" max="20"></div>
+   </div>
+   <div class="actions">
+    <button class="primary" type="submit">Lưu cấu hình</button>
+    <button class="secondary" type="button" onclick="findServer()">Tìm Server tự động</button>
+   </div>
+   <div class="muted" id="findResult"></div>
+  </div>
+
+  <div id="wifi" class="panel">
+   <div class="group-title">Kết nối Wi-Fi</div>
+   <div class="grid">
+    <div class="card">
+     <h2>MẠNG HIỆN TẠI</h2>
+     <div class="big" id="wifiCurrent2">--</div>
+     <div class="stat"><span>IP</span><span class="val" id="wifiIp2">--</span></div>
+     <div class="stat"><span>Tín hiệu</span><span class="val" id="wifiRssi2">--</span></div>
+    </div>
+    <div class="card full">
+     <h2>ĐỔI MẠNG</h2>
+     <div class="form-grid">
+      <div><label>SSID</label><input id="newSsid" maxlength="32" autocomplete="off"></div>
+      <div><label>Mật khẩu</label><input id="newPass" type="password" maxlength="64" autocomplete="new-password"></div>
+     </div>
+     <div class="actions">
+      <button class="secondary" type="button" onclick="scanWifi()">Quét mạng</button>
+      <button class="primary" type="button" onclick="connectWifi()">Kết nối</button>
+     </div>
+     <div class="muted" id="wifiMsg">AP cứu hộ: ViPi-V2-Setup</div>
+     <div class="wifi-list" id="wifiList" style="display:none"></div>
+    </div>
+   </div>
+  </div>
+
+  <div id="audio" class="panel">
+   <div class="group-title">Âm thanh</div>
+   <div class="form-grid">
+    <div><label>Âm lượng mặc định</label><input name="volume2" type="number" min="1" max="20"></div>
+    <div><label>Thời gian nghe sau wake</label><input name="record_ms2" type="number" min="1000" max="30000" step="500"></div>
+   </div>
+   <div class="muted">Thay đổi chính vẫn được lưu từ tab Trợ lý để tránh ghi cấu hình trùng.</div>
+  </div>
+
+  <div id="hardware" class="panel">
+   <div class="group-title">Phần cứng</div>
+   <div class="form-grid">
+    <div>
+     <label>Hardware Profile</label>
+     <select name="hardware_profile">
+      <option value="0">Purple Board</option>
+      <option value="1">Custom</option>
+     </select>
+    </div>
+   </div>
+
+   <details>
+    <summary>Audio GPIO</summary>
+    <div class="form-grid">
+     <div><label>MIC WS</label><input name="mic_ws" type="number" min="0" max="48"></div>
+     <div><label>MIC BCLK</label><input name="mic_bclk" type="number" min="0" max="48"></div>
+     <div><label>MIC DIN</label><input name="mic_din" type="number" min="0" max="48"></div>
+     <div><label>Speaker BCLK</label><input name="spk_bclk" type="number" min="0" max="48"></div>
+     <div><label>Speaker LRCK / WS</label><input name="spk_ws" type="number" min="0" max="48"></div>
+     <div><label>Speaker DOUT</label><input name="spk_dout" type="number" min="0" max="48"></div>
+    </div>
+   </details>
+
+   <details>
+    <summary>LED WS2812</summary>
+    <div class="form-grid">
+     <div><label>GPIO LED</label><input name="led_pin" type="number" min="0" max="48"></div>
+     <div><label>Số LED</label><input name="led_count" type="number" min="1" max="300"></div>
+     <div><label>Độ sáng (%)</label><input name="led_bright" type="number" min="1" max="100"></div>
+     <div><label>Đảo chiều</label><select name="led_reverse"><option value="0">Không</option><option value="1">Có</option></select></div>
+     <div><label>LED Offset</label><input name="led_offset" type="number" min="0" max="299"></div>
+    </div>
+   </details>
+
+   <details>
+    <summary>Màn hình</summary>
+    <div class="form-grid">
+     <div><label>Loại màn hình</label>
+      <select name="display_type">
+       <option value="0">Không dùng</option>
+       <option value="1">SSD1306 128x64 I2C</option>
+       <option value="2">ST7789 SPI</option>
+      </select>
+     </div>
+     <div><label>OLED SDA</label><input name="display_sda" type="number" min="0" max="48"></div>
+     <div><label>OLED SCL</label><input name="display_scl" type="number" min="0" max="48"></div>
+     <div><label>OLED I2C Address</label><input name="display_addr" type="number" min="8" max="119"></div>
+    </div>
+   </details>
+
+   <details>
+    <summary>Nút điều khiển</summary>
+    <div class="form-grid">
+     <div><label>Bật nút vật lý</label><select name="touch_enabled"><option value="1">Có</option><option value="0">Không</option></select></div>
+     <div><label>GPIO Volume +</label><input name="touch_up" type="number" min="0" max="48"></div>
+     <div><label>GPIO Volume -</label><input name="touch_down" type="number" min="0" max="48"></div>
+     <div><label>GPIO Action</label><input name="touch_action" type="number" min="0" max="48"></div>
+    </div>
+   </details>
+
+   <div class="actions"><button class="primary" type="submit">Lưu cấu hình phần cứng</button></div>
+  </div>
+ </form>
+
+ <div id="firmware" class="panel">
+  <div class="group-title">Firmware OTA</div>
+  <div class="grid">
+   <div class="card">
+    <h2>INSTALLED</h2>
+    <div class="big">v<span id="fwInstalled">--</span></div>
+    <div class="muted" id="fwBuild">--</div>
+   </div>
+   <div class="card">
+    <h2>LATEST</h2>
+    <div class="big">v<span id="fwLatest2">--</span></div>
+    <div class="muted" id="fwState">Đang kiểm tra...</div>
+   </div>
+  </div>
+  <div class="group-title">Cập nhật thủ công</div>
+  <div class="muted">Chỉ chọn VIPI_V2_CLIENT_APP.bin. Không dùng FULL.bin hoặc FLASH_ALL.bin.</div>
+  <input id="fwFile" type="file" accept=".bin" style="margin-top:10px">
+  <div class="actions"><button class="primary" type="button" onclick="otaUpload()">Upload APP.bin</button></div>
+  <div class="muted" id="otaMsg"></div>
+ </div>
+
+ <div id="logs" class="panel">
+  <div class="group-title">Live Event Log</div>
+  <div class="logbar">
+   <span class="badge"><span class="dot"></span>LIVE</span>
+   <div>
+    <button class="secondary" type="button" onclick="toggleLogs()" id="pauseLog">Tạm dừng</button>
+    <button class="secondary" type="button" onclick="clearLogs()">Xóa màn hình</button>
+   </div>
+  </div>
+  <div class="logs" id="logBox">Đang tải log...</div>
+  <div class="muted" style="margin-top:8px">Log chỉ lưu trong RAM, không ghi flash.</div>
+ </div>
+</div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+let statusData={},logPaused=false;
+
+const $=s=>document.querySelector(s);
+const $$=s=>document.querySelectorAll(s);
+
+function toast(t){
+ let e=$('#toast');e.textContent=t;e.classList.add('show');
+ setTimeout(()=>e.classList.remove('show'),2400);
+}
+
+function setVal(name,v){
+ let e=document.querySelector('[name="'+name+'"]');
+ if(e && v!==undefined && v!==null)e.value=String(v);
+}
+
+function fmtTime(s){
+ s=Number(s||0);
+ let d=Math.floor(s/86400),h=Math.floor(s%86400/3600),
+     m=Math.floor(s%3600/60);
+ if(d)return d+'d '+h+'h';
+ if(h)return h+'h '+m+'m';
+ return m+' phút';
+}
+
+function quality(r){
+ if(r>=-55)return 'Rất tốt';
+ if(r>=-65)return 'Tốt';
+ if(r>=-75)return 'Trung bình';
+ if(r>-120)return 'Yếu';
+ return '--';
+}
+
+async function refreshStatus(){
+ try{
+  let r=await fetch('/status',{cache:'no-store'});
+  let j=await r.json(); statusData=j;
+
+  $('#heroSub').textContent=(j.room||'ViPi')+' · '+(j.ip||'Không có IP');
+  $('#serverIp').textContent=j.server||'--';
+  $('#roomText').textContent=j.room||'--';
+  $('#wakeText').textContent=j.wake||'--';
+  $('#fwVersion').textContent=j.firmware||'--';
+  $('#fwInstalled').textContent=j.firmware||'--';
+  $('#buildId').textContent='Build '+(j.build_id||'--');
+  $('#fwBuild').textContent=j.build_id||'--';
+  $('#uptime').textContent=fmtTime(j.uptime);
+
+  $('#wifiName').textContent=j.ssid||'Chưa kết nối';
+  $('#wifiCurrent2').textContent=j.ssid||'Chưa kết nối';
+  $('#wifiIp').textContent=j.ip||'--';
+  $('#wifiIp2').textContent=j.ip||'--';
+  $('#wifiRssi').textContent=j.connected?(j.rssi+' dBm'):'--';
+  $('#wifiRssi2').textContent=j.connected?(j.rssi+' dBm'):'--';
+  $('#wifiQuality').textContent=j.connected?quality(j.rssi):'Không kết nối';
+  $('#onlineBadge').textContent=j.connected?'● ONLINE':'● AP / OFFLINE';
+
+  setVal('room',j.room);setVal('server',j.server);setVal('wake',j.wake);
+  setVal('threshold',j.threshold);setVal('record_ms',j.record_ms);
+  setVal('volume',j.volume);
+  setVal('volume2',j.volume);setVal('record_ms2',j.record_ms);
+  setVal('hardware_profile',j.hardware_profile);
+  setVal('mic_ws',j.mic_ws);setVal('mic_bclk',j.mic_bclk);setVal('mic_din',j.mic_din);
+  setVal('spk_bclk',j.spk_bclk);setVal('spk_ws',j.spk_ws);setVal('spk_dout',j.spk_dout);
+  setVal('led_pin',j.led_pin);setVal('led_count',j.led_count);
+  setVal('led_bright',j.led_bright);setVal('led_reverse',j.led_reverse?1:0);
+  setVal('led_offset',j.led_offset);
+  setVal('display_type',j.display_type);setVal('display_sda',j.display_sda);
+  setVal('display_scl',j.display_scl);setVal('display_addr',j.display_addr);
+  setVal('touch_enabled',j.touch_enabled?1:0);setVal('touch_up',j.touch_up);
+  setVal('touch_down',j.touch_down);setVal('touch_action',j.touch_action);
+ }catch(e){
+  $('#onlineBadge').textContent='● OFFLINE';
+ }
+}
+
+async function checkLatest(){
+ try{
+  let r=await fetch('https://raw.githubusercontent.com/longhd2/ViPi-ESP32-Firmware/main/latest.json',
+                    {cache:'no-store'});
+  if(!r.ok)throw 0;
+  let j=await r.json(),v=j.version||'--';
+  $('#latestVersion').textContent=v;
+  $('#fwLatest2').textContent=v;
+
+  let cur=statusData.firmware||'';
+  $('#fwState').textContent=(cur===v)?'✓ Đã là phiên bản mới nhất':'Có bản mới '+v;
+ }catch(e){
+  $('#latestVersion').textContent='--';
+  $('#fwLatest2').textContent='--';
+  $('#fwState').textContent='Không kiểm tra được';
+ }
+}
+
+function activateTab(id){
+ $$('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
+ $$('.panel').forEach(x=>x.classList.toggle('active',x.id===id));
+ if(id==='logs')loadLogs();
+ if(id==='wifi')refreshWifi();
+}
+
+$$('.tab').forEach(x=>x.onclick=()=>activateTab(x.dataset.tab));
+
+function openWifi(){activateTab('wifi');window.scrollTo({top:document.body.scrollHeight/3,behavior:'smooth'})}
+
+async function refreshWifi(){
+ try{
+  let r=await fetch('/wifi/status',{cache:'no-store'});
+  let j=await r.json();
+  $('#wifiCurrent2').textContent=j.ssid||'Chưa kết nối';
+  $('#wifiIp2').textContent=j.ip||'--';
+  $('#wifiRssi2').textContent=j.connected?(j.rssi+' dBm'):'--';
+ }catch(e){}
+}
+
+async function scanWifi(){
+ let msg=$('#wifiMsg'),box=$('#wifiList');
+ msg.textContent='Đang quét Wi-Fi...';
+ box.style.display='none';
+ try{
+  let r=await fetch('/wifi/scan',{cache:'no-store'});
+  let j=await r.json();
+  if(!r.ok)throw new Error(j.error||'Scan failed');
+
+  box.innerHTML='';
+  (j.networks||[]).forEach(n=>{
+   let row=document.createElement('div');row.className='wifi-row';
+   let a=document.createElement('div');a.textContent=n.ssid||'(Ẩn)';
+   let b=document.createElement('div');b.className='signal';b.textContent=n.rssi+' dBm';
+   let c=document.createElement('div');c.className='security';c.textContent=n.secure?'🔒':'Mở';
+   row.append(a,b,c);
+   row.onclick=()=>{ $('#newSsid').value=n.ssid||''; $('#newPass').focus(); };
+   box.appendChild(row);
+  });
+  box.style.display='block';
+  msg.textContent='Tìm thấy '+(j.networks||[]).length+' mạng';
+ }catch(e){msg.textContent='Không quét được Wi-Fi';}
+}
+
+async function connectWifi(){
+ let ssid=$('#newSsid').value.trim(),pass=$('#newPass').value,msg=$('#wifiMsg');
+ if(!ssid){msg.textContent='Hãy chọn hoặc nhập SSID';return}
+ if(!confirm('Chuyển ViPi sang Wi-Fi "'+ssid+'"?'))return;
+
+ msg.textContent='Đang lưu và kết nối...';
+ try{
+  let body=new URLSearchParams({ssid:ssid,password:pass});
+  let r=await fetch('/wifi/connect',{
+   method:'POST',
+   headers:{'Content-Type':'application/x-www-form-urlencoded'},
+   body
+  });
+  let j=await r.json();
+  if(!r.ok)throw new Error(j.error||'Connect failed');
+  msg.textContent='Đã nhận cấu hình. Thiết bị đang chuyển mạng...';
+  $('#newPass').value='';
+  toast('Đang chuyển Wi-Fi');
+  setTimeout(refreshStatus,5000);
+ }catch(e){msg.textContent='Không thể đổi Wi-Fi';}
+}
+
+async function findServer(){
+ let e=$('#findResult');e.textContent='Đang tìm máy chủ...';
+ try{
+  let r=await fetch('/find');let j=await r.json();
+  if(j.found){
+   setVal('server',j.ip);e.textContent='Đã tìm thấy '+j.ip;toast('Đã tìm thấy Server');
+  }else e.textContent='Chưa thấy Server';
+ }catch(x){e.textContent='Không tìm được Server';}
+}
+
+async function loadLogs(){
+ if(logPaused || document.hidden)return;
+ try{
+  let r=await fetch('/logs',{cache:'no-store'});
+  let j=await r.json(),box=$('#logBox');
+  box.textContent=(j.logs||[]).map(x=>{
+   let sec=Math.floor((x.ms||0)/1000);
+   let h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
+   return '['+[h,m,s].map(v=>String(v).padStart(2,'0')).join(':')+'] '+x.message;
+  }).join('\n') || 'Chưa có sự kiện.';
+  box.scrollTop=box.scrollHeight;
+ }catch(e){}
+}
+
+function toggleLogs(){
+ logPaused=!logPaused;
+ $('#pauseLog').textContent=logPaused?'Tiếp tục':'Tạm dừng';
+ if(!logPaused)loadLogs();
+}
+function clearLogs(){$('#logBox').textContent=''}
+
+async function otaUpload(){
+ let f=$('#fwFile').files[0],e=$('#otaMsg');
+ if(!f){e.textContent='Hãy chọn VIPI_V2_CLIENT_APP.bin';return}
+ if(!f.name.toLowerCase().endsWith('.bin')){e.textContent='File không hợp lệ';return}
+ if(!confirm('Cập nhật '+f.name+'? Không tắt nguồn.'))return;
+ e.textContent='Đang upload firmware...';
+ try{
+  let r=await fetch('/ota',{
+   method:'POST',
+   headers:{'Content-Type':'application/octet-stream','X-Filename':f.name},
+   body:f
+  });
+  let t=await r.text();e.textContent=t;
+  if(r.ok)e.textContent+=' Thiết bị đang khởi động lại.';
+ }catch(x){e.textContent='Mất kết nối khi reboot có thể là bình thường.'}
+}
+
+$('#cfg').addEventListener('submit',()=>{
+ let v=document.querySelector('[name=volume2]').value;
+ let r=document.querySelector('[name=record_ms2]').value;
+ if(v)setVal('volume',v);
+ if(r)setVal('record_ms',r);
+});
+
+refreshStatus();
+setTimeout(checkLatest,500);
+setInterval(refreshStatus,5000);
+setInterval(loadLogs,1200);
+</script>
+</body>
+</html>
+)VIPI";
+
+  httpd_resp_set_type(req, "text/html; charset=utf-8");
+  return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t ViPiAudio::web_save_(httpd_req_t *req) {
@@ -1478,6 +2031,7 @@ esp_err_t ViPiAudio::web_save_(httpd_req_t *req) {
   }
 
   bool ok=self->save_settings_();
+  if (ok) vipi_web_event("Configuration saved");
 
   // Wake/server changes can apply immediately.
   // Hardware pin changes take effect after reboot.
@@ -1508,26 +2062,273 @@ esp_err_t ViPiAudio::web_find_(httpd_req_t *req) {
 }
 
 esp_err_t ViPiAudio::web_status_(httpd_req_t *req) {
-  auto *self=(ViPiAudio*)req->user_ctx;
-  std::string j="{\"server\":\""+self->server_ip_+"\",\"wake\":\""+self->command_+"\",\"room\":\""+self->room_+"\"}";
-  httpd_resp_set_type(req,"application/json"); return httpd_resp_send(req,j.c_str(),j.size());
+  auto *self = (ViPiAudio *) req->user_ctx;
+
+  bool connected = false;
+  std::string ssid;
+  std::string ip;
+  int rssi = -127;
+  vipi_wifi_info(connected, ssid, ip, rssi);
+
+  char json[768];
+
+  int n = snprintf(
+      json, sizeof(json),
+      "{"
+      "\"firmware\":\"%s\","
+      "\"build_id\":\"%s\","
+      "\"build_time\":\"%s\","
+      "\"connected\":%s,"
+      "\"ip\":\"%s\","
+      "\"server\":\"%s\","
+      "\"room\":\"%s\","
+      "\"wake\":\"%s\","
+      "\"volume\":%d,"
+      "\"rssi\":%d,"
+      "\"uptime\":%lu"
+      "}",
+      VIPI_FW_VERSION,
+      VIPI_BUILD_ID,
+      VIPI_BUILD_TIME,
+      connected ? "true" : "false",
+      ip.c_str(),
+      self->server_ip_.c_str(),
+      self->room_.c_str(),
+      self->command_.c_str(),
+      self->volume_,
+      rssi,
+      (unsigned long)(millis() / 1000UL));
+
+  if (n < 0 || n >= (int)sizeof(json)) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_sendstr(req, "{\"error\":\"status overflow\"}");
+  }
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, json, n);
 }
 
 void ViPiAudio::start_web_() {
-  httpd_config_t cfg=HTTPD_DEFAULT_CONFIG(); cfg.server_port=80; cfg.max_uri_handlers=10;
-  if(httpd_start(&web_server_,&cfg)!=ESP_OK){ ESP_LOGW(TAG,"Web setup failed to start"); return; }
-  httpd_uri_t root{}; root.uri="/"; root.method=HTTP_GET; root.handler=web_root_; root.user_ctx=this; httpd_register_uri_handler(web_server_,&root);
-  httpd_uri_t save{}; save.uri="/save"; save.method=HTTP_POST; save.handler=web_save_; save.user_ctx=this; httpd_register_uri_handler(web_server_,&save);
-  httpd_uri_t find{}; find.uri="/find"; find.method=HTTP_GET; find.handler=web_find_; find.user_ctx=this; httpd_register_uri_handler(web_server_,&find);
-  httpd_uri_t stat{}; stat.uri="/status"; stat.method=HTTP_GET; stat.handler=web_status_; stat.user_ctx=this; httpd_register_uri_handler(web_server_,&stat);
-  httpd_uri_t mp{}; mp.uri="/music/play"; mp.method=HTTP_POST; mp.handler=web_music_play_; mp.user_ctx=this; httpd_register_uri_handler(web_server_,&mp);
-  httpd_uri_t ms{}; ms.uri="/music/stop"; ms.method=HTTP_POST; ms.handler=web_music_stop_; ms.user_ctx=this; httpd_register_uri_handler(web_server_,&ms);
-  httpd_uri_t ota{}; ota.uri="/ota"; ota.method=HTTP_POST; ota.handler=web_ota_; ota.user_ctx=this; httpd_register_uri_handler(web_server_,&ota);
-  web_started_=true; ESP_LOGI(TAG,"V2 Web Setup + OTA: http://<device-ip>/");
+  httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+  cfg.server_port = 80;
+  cfg.max_uri_handlers = 14;
+  // ViPi Web V2 handlers build JSON/HTML and need more stack than
+  // ESP-IDF HTTPD default. Prevent httpd task stack overflow/reboot.
+  cfg.stack_size = 12288;
+
+  if (httpd_start(&web_server_, &cfg) != ESP_OK) {
+    web_server_ = nullptr;
+    ESP_LOGW(TAG, "Web setup failed to start; retry in 5s");
+    return;
+  }
+
+  auto reg = [&](const char *uri, httpd_method_t method, esp_err_t (*handler)(httpd_req_t *)) {
+    httpd_uri_t h{};
+    h.uri = uri;
+    h.method = method;
+    h.handler = handler;
+    h.user_ctx = this;
+    return httpd_register_uri_handler(web_server_, &h);
+  };
+
+  reg("/", HTTP_GET, web_root_);
+  reg("/save", HTTP_POST, web_save_);
+  reg("/find", HTTP_GET, web_find_);
+  reg("/status", HTTP_GET, web_status_);
+  reg("/wifi/status", HTTP_GET, web_wifi_status_);
+  reg("/wifi/scan", HTTP_GET, web_wifi_scan_);
+  reg("/wifi/connect", HTTP_POST, web_wifi_connect_);
+  reg("/logs", HTTP_GET, web_logs_);
+  reg("/music/play", HTTP_POST, web_music_play_);
+  reg("/music/stop", HTTP_POST, web_music_stop_);
+  reg("/ota", HTTP_POST, web_ota_);
+
+  web_started_ = true;
+  vipi_web_event("Web dashboard started");
+  ESP_LOGI(TAG, "ViPi Client Dashboard: http://<device-ip>/");
 }
 
+esp_err_t ViPiAudio::web_wifi_status_(httpd_req_t *req) {
+  bool connected = false;
+  std::string ssid;
+  std::string ip;
+  int rssi = -127;
+
+  vipi_wifi_info(connected, ssid, ip, rssi);
+
+  std::string j =
+      "{"
+      "\"connected\":" + std::string(connected ? "true" : "false") + ","
+      "\"ssid\":\"" + vipi_json_escape(ssid) + "\","
+      "\"ip\":\"" + vipi_json_escape(ip) + "\","
+      "\"rssi\":" + std::to_string(rssi) +
+      "}";
+
+  httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, j.c_str(), j.size());
+}
+
+esp_err_t ViPiAudio::web_wifi_scan_(httpd_req_t *req) {
+  wifi_scan_config_t cfg{};
+  cfg.show_hidden = false;
+
+  esp_err_t err = esp_wifi_scan_start(&cfg, true);
+
+  if (err != ESP_OK) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"error\":\"scan failed\"}");
+  }
+
+  uint16_t count = 0;
+  esp_wifi_scan_get_ap_num(&count);
+
+  if (count > 20)
+    count = 20;
+
+  std::vector<wifi_ap_record_t> aps(count);
+
+  if (count > 0) {
+    uint16_t n = count;
+    if (esp_wifi_scan_get_ap_records(&n, aps.data()) != ESP_OK)
+      count = 0;
+    else
+      count = n;
+  }
+
+  std::sort(
+      aps.begin(),
+      aps.begin() + count,
+      [](const wifi_ap_record_t &a, const wifi_ap_record_t &b) {
+        return a.rssi > b.rssi;
+      });
+
+  std::string j = "{\"networks\":[";
+
+  for (uint16_t i = 0; i < count; i++) {
+    if (i) j += ",";
+
+    std::string ssid =
+        reinterpret_cast<const char *>(aps[i].ssid);
+
+    j +=
+        "{\"ssid\":\"" + vipi_json_escape(ssid) +
+        "\",\"rssi\":" + std::to_string(aps[i].rssi) +
+        ",\"secure\":" +
+        std::string(aps[i].authmode == WIFI_AUTH_OPEN ? "false" : "true") +
+        "}";
+  }
+
+  j += "]}";
+
+  vipi_web_event("Wi-Fi scan completed");
+
+  httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, j.c_str(), j.size());
+}
+
+esp_err_t ViPiAudio::web_wifi_connect_(httpd_req_t *req) {
+  std::string body;
+  body.resize(req->content_len);
+
+  int got = 0;
+  while (got < req->content_len) {
+    int n = httpd_req_recv(
+        req,
+        &body[got],
+        req->content_len - got);
+
+    if (n <= 0)
+      break;
+
+    got += n;
+  }
+  body.resize(got);
+
+  std::string ssid = form_value_(body, "ssid");
+  std::string password = form_value_(body, "password");
+
+  if (ssid.empty() || ssid.size() > 32 || password.size() > 64) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(
+        req,
+        "{\"error\":\"invalid wifi configuration\"}");
+  }
+
+  if (wifi::global_wifi_component == nullptr) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(
+        req,
+        "{\"error\":\"wifi component unavailable\"}");
+  }
+
+  wifi::WiFiAP ap;
+  ap.set_ssid(ssid);
+  ap.set_password(password);
+
+  // Save through ESPHome WiFiComponent so credentials survive reboot.
+  wifi::global_wifi_component->save_wifi_sta(ssid, password);
+  wifi::global_wifi_component->set_sta(ap);
+
+  std::string log = "Wi-Fi change requested: " + ssid;
+  vipi_web_event(log.c_str());
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(
+      req,
+      "{\"ok\":true,\"message\":\"wifi switching\"}");
+
+  // Give HTTP response time to leave before radio reconnects.
+  vTaskDelay(pdMS_TO_TICKS(250));
+
+  wifi::global_wifi_component->start_connecting(ap);
+
+  return ESP_OK;
+}
+
+esp_err_t ViPiAudio::web_logs_(httpd_req_t *req) {
+  std::string j = "{\"logs\":[";
+
+  uint8_t count;
+  uint8_t head;
+
+  portENTER_CRITICAL(&vipi_web_log_mux);
+  count = vipi_web_log_count;
+  head = vipi_web_log_head;
+  portEXIT_CRITICAL(&vipi_web_log_mux);
+
+  for (uint8_t i = 0; i < count; i++) {
+    uint8_t idx =
+        static_cast<uint8_t>((head + 64 - count + i) % 64);
+
+    ViPiWebLogEntry e{};
+
+    portENTER_CRITICAL(&vipi_web_log_mux);
+    e = vipi_web_logs[idx];
+    portEXIT_CRITICAL(&vipi_web_log_mux);
+
+    if (i)
+      j += ",";
+
+    j +=
+        "{\"ms\":" + std::to_string(e.ms) +
+        ",\"message\":\"" +
+        vipi_json_escape(e.text) +
+        "\"}";
+  }
+
+  j += "]}";
+
+  httpd_resp_set_type(req, "application/json");
+  return httpd_resp_send(req, j.c_str(), j.size());
+}
 
 esp_err_t ViPiAudio::web_ota_(httpd_req_t *req) {
+
+  vipi_web_event("OTA upload started");
 
   vipi_led_manager.set_state(
       ViPiLedState::OTA);
@@ -1578,6 +2379,7 @@ esp_err_t ViPiAudio::web_ota_(httpd_req_t *req) {
     return httpd_resp_sendstr(req, "OTA failed");
   }
   httpd_resp_sendstr(req, "OTA OK.");
+  vipi_web_event("OTA complete - rebooting");
   ESP_LOGI(TAG, "OTA complete, rebooting...");
   vTaskDelay(pdMS_TO_TICKS(800));
   esp_restart();
@@ -1587,6 +2389,7 @@ esp_err_t ViPiAudio::web_ota_(httpd_req_t *req) {
 
 
 // ===== END vipi_web_impl.inc =====
+// ===== END VIPI WEB V2 =====
 
 
 // ===== BEGIN vipi_media_impl.inc =====

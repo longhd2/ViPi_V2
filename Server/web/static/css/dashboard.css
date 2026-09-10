@@ -1651,3 +1651,113 @@ footer{
     font-size:9px;
   }
 }
+
+
+/* ===== ViPi Version / OTA ===== */
+
+.version-strip{
+  display:grid;
+  grid-template-columns:1fr 1fr auto;
+  gap:7px;
+  align-items:center;
+  margin-bottom:9px;
+}
+
+.version-strip > div{
+  padding:8px 10px;
+  border:1px solid #c5dfdc;
+  border-radius:10px;
+  background:linear-gradient(145deg,#eef9f7,#e7f5f2);
+}
+
+.version-strip span{
+  display:block;
+  margin-bottom:2px;
+  color:var(--muted);
+  font-size:9px;
+  font-weight:700;
+}
+
+.version-strip b{
+  font-size:14px;
+}
+
+.client-device{
+  margin-bottom:8px;
+  padding:11px !important;
+  border:1px solid #c6dfdc !important;
+  border-radius:12px;
+  background:linear-gradient(145deg,#f7fcfb,#edf8f6);
+}
+
+.client-head{
+  grid-column:1/-1 !important;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+
+.client-room{
+  padding:4px 8px;
+  border-radius:999px;
+  background:#dff3ef;
+  color:#087d6d;
+  font-size:10px;
+  font-weight:700;
+}
+
+.client-build{
+  grid-column:1/-1;
+}
+
+.client-build b{
+  overflow-wrap:anywhere;
+}
+
+.client-actions{
+  grid-column:1/-1;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.client-actions button{
+  flex:1 1 auto;
+  min-width:90px;
+}
+
+.update-state{
+  grid-column:1/-1;
+  padding:6px 9px;
+  border-radius:8px;
+  background:#edf4f3;
+  color:var(--muted);
+  font-size:10px;
+  font-weight:650;
+}
+
+.update-state.update-new{
+  background:#fff4d9;
+  color:#a66700;
+}
+
+.update-state.updating{
+  background:#e3f3ff;
+  color:#166b9c;
+}
+
+@media(max-width:700px){
+  .version-strip{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .version-strip button{
+    grid-column:1/-1;
+  }
+
+  .client-actions{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+}
