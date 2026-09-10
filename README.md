@@ -254,7 +254,7 @@ Biên dịch
 - `CLIENT_APP.bin`: dùng cập nhật OTA.
 - `CLIENT_FULL.bin`: dùng nạp mới hoặc phục hồi ESP32 qua USB.
 
-Chi tiết xem `ESP32_GUIDE.md`.
+Chi tiết xem `docs/Hardware/ESP32_GUIDE.md`.
 
 ---
 
@@ -266,7 +266,7 @@ Quy trình:
 Phát triển → Kiểm tra → Commit → Push main → Kiểm tra ổn định → Tạo tag Stable
 ```
 
-Chi tiết xem `GIT_GUIDE.md`.
+Chi tiết xem `docs/GIT_GUIDE.md`.
 
 ---
 
@@ -275,10 +275,10 @@ Chi tiết xem `GIT_GUIDE.md`.
 | Tệp | Nội dung |
 |---|---|
 | `README.md` | Tổng quan ViPi |
-| `RUN_GUIDE.md` | Chạy và kiểm tra Server |
-| `ESP32_GUIDE.md` | Build, firmware, USB và OTA |
-| `GIT_GUIDE.md` | Git, GitHub, version và phục hồi |
-| `INSTALL.md` | Cài đặt/khôi phục |
+| `docs/RUN_GUIDE.md` | Chạy và kiểm tra Server |
+| `docs/Hardware/ESP32_GUIDE.md` | Build, firmware, USB và OTA |
+| `docs/GIT_GUIDE.md` | Git, GitHub, version và phục hồi |
+| `docs/INSTALL.md` | Cài đặt/khôi phục |
 | `VERSION` | Phiên bản hiện tại |
 
 ---
@@ -315,3 +315,13 @@ Không đưa lên GitHub:
 - scheduler runtime
 
 **ViPi V2.0.1**
+
+
+---
+
+## Tài liệu hướng dẫn
+
+Toàn bộ tài liệu vận hành, Git, cài đặt, ESP32 và phần cứng được tập trung tại:
+
+- [Tài liệu ViPi V2](docs/README.md)
+- [Tài liệu phần cứng](docs/Hardware/README.md)

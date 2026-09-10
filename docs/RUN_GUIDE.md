@@ -64,4 +64,4 @@ git tag --sort=-version:refname
 - V2 nằm tại `/home/server/ViPi_V2`.
 - Không đóng TCP 3001.
 - Không đưa secret lên GitHub.
-- Hướng dẫn firmware ESP32 xem `ESP32_GUIDE.md`.
+- Hướng dẫn firmware ESP32 xem `Hardware/ESP32_GUIDE.md`.
