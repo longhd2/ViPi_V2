@@ -72,3 +72,4 @@ supervisor/*.sock
 vipi_install_perf_profiler.sh
 vipi_readme_v2001.sh
 vipi_v201_tai_lieu_day_du.sh
+supervisor/supervisord.conf

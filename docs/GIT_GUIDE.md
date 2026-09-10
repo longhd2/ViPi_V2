@@ -14,7 +14,7 @@ Repository phải giữ ở chế độ **PRIVATE**.
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git status --short
 git diff --stat
 ```
@@ -23,7 +23,7 @@ Xem chi tiết:
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git diff
 ```
 
@@ -35,7 +35,7 @@ Sau khi test ổn:
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git add -A
 git status --short
 git commit -m "Cập nhật ViPi"
@@ -50,7 +50,7 @@ Ví dụ tạo `v2.0.2`:
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 printf '2.0.2\n' > VERSION
 git add -A
 git status --short
@@ -66,7 +66,7 @@ git push origin v2.0.2
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 echo "LOCAL HEAD  : $(git rev-parse --short HEAD)"
 echo "REMOTE HEAD : $(git ls-remote origin refs/heads/main | cut -c1-7)"
 echo "TAG         : $(git describe --tags --exact-match HEAD 2>/dev/null || true)"
@@ -80,7 +80,7 @@ LOCAL HEAD và REMOTE HEAD phải giống nhau.
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git tag --sort=-version:refname
 ```
 
@@ -90,7 +90,7 @@ git tag --sort=-version:refname
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git log --oneline --decorate --graph -20
 ```
 
@@ -122,7 +122,7 @@ Clone:
 clear
 cd /home/server
 gh repo clone longhd2/ViPi_V2 ViPi_V2
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git status
 ```
 
@@ -136,7 +136,7 @@ Ví dụ:
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git switch --detach v2.0.0
 ```
 
@@ -144,7 +144,7 @@ Quay lại main:
 
 ```bash
 clear
-cd /home/server/ViPi_V2
+cd $HOME/ViPi_V2
 git switch main
 ```
 

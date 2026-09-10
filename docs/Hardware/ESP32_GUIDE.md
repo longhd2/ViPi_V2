@@ -4,10 +4,10 @@
 
 ```bash
 clear
-cd /home/server/ViPi_V2/Client
+cd $HOME/ViPi_V2/Client
 ```
 
-Không sử dụng `/home/server/ViPi_V2_NEW`.
+Không sử dụng `$HOME/ViPi_V2_NEW`.
 
 Không tạo cố định `Client/components/`. ViPi sử dụng `runtime_components` theo cấu trúc hiện tại.
 
@@ -19,7 +19,7 @@ Lệnh chuẩn:
 
 ```bash
 clear
-cd /home/server/ViPi_V2/Client
+cd $HOME/ViPi_V2/Client
 ./build.sh
 ```
 
@@ -29,7 +29,7 @@ Sau khi thành công, kiểm tra:
 
 ```bash
 clear
-cd /home/server/ViPi_V2/Client
+cd $HOME/ViPi_V2/Client
 find . -maxdepth 1 -type f \( -name 'VIPI*_CLIENT_APP.bin' -o -name 'VIPI*_CLIENT_FULL.bin' -o -name '*.elf' \) -printf '%f  %s bytes\n' | sort
 ```
 
@@ -76,7 +76,7 @@ Lệnh chuẩn:
 
 ```bash
 clear
-cd /home/server/ViPi_V2/Client
+cd $HOME/ViPi_V2/Client
 ./build.sh
 ```
 
@@ -97,7 +97,7 @@ Không tự đặt offset và ghép firmware bằng lệnh khác khi chưa kiể
 
 ```bash
 clear
-cd /home/server/ViPi_V2/Client
+cd $HOME/ViPi_V2/Client
 APP="$(find . -maxdepth 1 -type f -name 'VIPI*_CLIENT_APP.bin' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
 FULL="$(find . -maxdepth 1 -type f -name 'VIPI*_CLIENT_FULL.bin' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
 echo "APP  : $APP"
@@ -121,7 +121,7 @@ Ví dụ ESP32 ở `/dev/ttyACM0`:
 
 ```bash
 clear
-cd /home/server/ViPi_V2/Client
+cd $HOME/ViPi_V2/Client
 FULL="$(find . -maxdepth 1 -type f -name 'VIPI*_CLIENT_FULL.bin' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
 echo "Nạp firmware: $FULL"
 python3 -m esptool --chip esp32s3 --port /dev/ttyACM0 write-flash 0x0 "$FULL"
@@ -145,7 +145,7 @@ Tìm APP mới nhất:
 
 ```bash
 clear
-cd /home/server/ViPi_V2/Client
+cd $HOME/ViPi_V2/Client
 APP="$(find . -maxdepth 1 -type f -name 'VIPI*_CLIENT_APP.bin' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
 echo "Firmware OTA: $APP"
 ls -lh "$APP"

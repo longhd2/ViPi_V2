@@ -16,8 +16,8 @@ Các tài liệu sau được đặt tại đây khi có:
 
 ## Quy ước
 
-- Client chính: `/home/server/ViPi_V2/Client`
-- Không sử dụng `/home/server/ViPi_V2_NEW`.
+- Client chính: `$HOME/ViPi_V2/Client`
+- Không sử dụng `$HOME/ViPi_V2_NEW`.
 - Không tạo cố định `Client/components/`.
 - Không đóng TCP 3001 khi ViPi đang hoạt động.
 - `CLIENT_APP.bin` dùng cho OTA.

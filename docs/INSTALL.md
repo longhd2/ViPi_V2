@@ -1,6 +1,6 @@
 # ViPi V2.0 - Recovery Guide
 
-Stable release: **2.0.0**
+Stable release: **2.0.3**
 
 ## What is stored in Git
 
