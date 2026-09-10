@@ -1,0 +1,112 @@
+.console-wrap{
+  width:calc(100% - 40px);
+  max-width:1500px;
+  margin:0 auto;
+  padding:18px 0;
+}
+
+.console-card{
+  padding:18px;
+}
+
+.console-title{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:14px;
+}
+
+.console-title h2{
+  margin:0;
+  font-size:23px;
+}
+
+.console-title p{
+  margin:4px 0 0;
+  color:var(--muted);
+}
+
+.safe-badge{
+  padding:7px 10px;
+  border-radius:20px;
+  background:#dff5ef;
+  color:#087d68;
+  font-size:11px;
+  font-weight:800;
+}
+
+.quick{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  margin-bottom:12px;
+}
+
+.web-terminal{
+  box-sizing:border-box;
+  width:100%;
+  height:calc(100vh - 280px);
+  min-height:430px;
+  margin:0;
+  padding:17px;
+  overflow:auto;
+  border-radius:12px;
+  background:#061b1e;
+  color:#72e8cb;
+  font-family:
+    "Cascadia Mono",
+    "Cascadia Code",
+    Consolas,
+    monospace;
+  font-size:14px;
+  line-height:1.55;
+  white-space:pre-wrap;
+}
+
+.command-line{
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  align-items:center;
+  gap:8px;
+  margin-top:10px;
+}
+
+.command-line span{
+  color:#087d68;
+  font-family:Consolas,monospace;
+  font-weight:700;
+}
+
+.command-line input{
+  min-width:0;
+  min-height:40px;
+  padding:8px 10px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:#f4faf8;
+  color:var(--text);
+  font-family:Consolas,monospace;
+  font-size:14px;
+}
+
+@media(max-width:700px){
+  .console-wrap{
+    width:100%;
+    padding:8px;
+    box-sizing:border-box;
+  }
+
+  .web-terminal{
+    height:55vh;
+    min-height:350px;
+    font-size:12px;
+  }
+
+  .command-line{
+    grid-template-columns:1fr auto;
+  }
+
+  .command-line span{
+    display:none;
+  }
+}

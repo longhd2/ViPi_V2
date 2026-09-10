@@ -1,0 +1,5 @@
+Display manager/renderer compile: PASS
+Display manager/renderer logic: PASS
+SSD1306 framebuffer compile: PASS
+SSD1306 framebuffer logic: PASS
+ESP32 physical OLED test: NOT RUN (requires target hardware)

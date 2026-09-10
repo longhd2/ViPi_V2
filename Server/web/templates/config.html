@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ViPi Config</title>
+<link rel="stylesheet" href="/static/css/dashboard.css?v=20260910-4">
+<link rel="stylesheet" href="/static/css/config.css?v=20260910-4">
+</head>
+
+<body>
+
+<header class="top">
+
+  <div class="brand">
+
+    <div class="mark">
+      <img src="/static/img/vipi-logo.png" alt="ViPi">
+    </div>
+
+    <div>
+      <h1>ViPi Server V2</h1>
+      <p>System Configuration</p>
+    </div>
+
+  </div>
+
+  <nav class="main-nav">
+    <a href="/">Dashboard</a>
+    <a class="active" href="/config">Config</a>
+    <a href="/console">&gt;_ Console</a>
+  </nav>
+
+</header>
+
+
+<main class="config-layout">
+
+  <aside class="config-menu card">
+
+    <h3>Configuration</h3>
+
+    <button class="cfg-tab active"
+            onclick="showTab('general',this)">
+      General
+    </button>
+
+    <button class="cfg-tab"
+            onclick="showTab('weather',this)">
+      Weather & Location
+    </button>
+
+    <button class="cfg-tab"
+            onclick="showTab('voice',this)">
+      Audio & Voice
+    </button>
+
+    <button class="cfg-tab"
+            onclick="showTab('network',this)">
+      Network
+    </button>
+
+    <button class="cfg-tab"
+            onclick="showTab('ha',this)">
+      Home Assistant
+    </button>
+
+  </aside>
+
+
+  <section class="config-content">
+
+    <article id="tab-general"
+             class="card cfg-panel active">
+
+      <div class="cfg-title">
+        <div>
+          <h2>General</h2>
+          <p>Thông tin chung ViPi Server</p>
+        </div>
+      </div>
+
+      <div class="cfg-info">
+
+        <div>
+          <span>Server</span>
+          <b>ViPi Server V2</b>
+        </div>
+
+        <div>
+          <span>Architecture</span>
+          <b>Local · NO LLM</b>
+        </div>
+
+        <div>
+          <span>Admin Web</span>
+          <b>Port 8090</b>
+        </div>
+
+        <div>
+          <span>Voice UDP</span>
+          <b>Port 3000</b>
+        </div>
+
+        <div>
+          <span>Media</span>
+          <b>Port 8088</b>
+        </div>
+
+        <div>
+          <span>STT</span>
+          <b>Port 8100</b>
+        </div>
+
+      </div>
+
+    </article>
+
+
+    <article id="tab-weather"
+             class="card cfg-panel">
+
+      <div class="cfg-title">
+
+        <div>
+          <h2>Weather & Location</h2>
+          <p>Địa điểm mặc định của ViPi</p>
+        </div>
+
+        <span id="weatherState"
+              class="pill">
+          Saved
+        </span>
+
+      </div>
+
+
+      <label class="field">
+        <span>Tìm địa điểm</span>
+
+        <div class="search-row">
+          <input id="locationSearch"
+                 placeholder="Ví dụ: Tam Kỳ">
+
+          <button class="primary"
+                  onclick="searchLocation()">
+            Tìm
+          </button>
+        </div>
+      </label>
+
+
+      <div id="locationResults"
+           class="location-results"></div>
+
+
+      <div class="form-grid">
+
+        <label class="field">
+          <span>Tên địa điểm</span>
+          <input id="locationName">
+        </label>
+
+        <label class="field">
+          <span>Timezone</span>
+          <input id="timezone">
+        </label>
+
+        <label class="field">
+          <span>Latitude</span>
+          <input id="latitude"
+                 type="number"
+                 step="any">
+        </label>
+
+        <label class="field">
+          <span>Longitude</span>
+          <input id="longitude"
+                 type="number"
+                 step="any">
+        </label>
+
+        <label class="field">
+          <span>Forecast days</span>
+          <input id="forecastDays"
+                 type="number"
+                 min="1"
+                 max="16">
+        </label>
+
+        <label class="field">
+          <span>Rain threshold (%)</span>
+          <input id="rainThreshold"
+                 type="number"
+                 min="0"
+                 max="100">
+        </label>
+
+      </div>
+
+
+      <div class="cfg-actions">
+
+        <button onclick="testWeather()">
+          Test Weather
+        </button>
+
+        <button class="primary"
+                onclick="saveWeather()">
+          Save Config
+        </button>
+
+      </div>
+
+
+      <pre id="weatherTest"
+           class="test-result">Chưa kiểm tra Weather.</pre>
+
+    </article>
+
+
+    <article id="tab-voice"
+             class="card cfg-panel">
+
+      <div class="cfg-title">
+        <div>
+          <h2>Audio & Voice</h2>
+          <p>Thông số runtime hiện tại</p>
+        </div>
+      </div>
+
+      <div class="notice">
+        Phần này hiện chỉ hiển thị trạng thái.
+        Chưa cho Save vì runtime chưa đọc các giá trị này
+        từ Config Manager.
+      </div>
+
+      <div class="cfg-info">
+
+        <div>
+          <span>Wake word</span>
+          <b>bebe</b>
+        </div>
+
+        <div>
+          <span>Audio</span>
+          <b>16 kHz mono</b>
+        </div>
+
+        <div>
+          <span>VAD frame</span>
+          <b>512 samples</b>
+        </div>
+
+        <div>
+          <span>TTS</span>
+          <b>Edge TTS</b>
+        </div>
+
+      </div>
+
+    </article>
+
+
+    <article id="tab-network"
+             class="card cfg-panel">
+
+      <div class="cfg-title">
+        <div>
+          <h2>Network</h2>
+          <p>ViPi network services</p>
+        </div>
+      </div>
+
+      <div class="cfg-info">
+
+        <div>
+          <span>Microphone</span>
+          <b>UDP :3000</b>
+        </div>
+
+        <div>
+          <span>ESP32 Speaker</span>
+          <b>TCP :3001</b>
+        </div>
+
+        <div>
+          <span>Control</span>
+          <b>TCP :3002</b>
+        </div>
+
+        <div>
+          <span>Multicast</span>
+          <b>239.0.0.1:12345</b>
+        </div>
+
+      </div>
+
+    </article>
+
+
+    <article id="tab-ha"
+             class="card cfg-panel">
+
+      <div class="cfg-title">
+        <div>
+          <h2>Home Assistant</h2>
+          <p>Optional ViPi Skill · LAN first / External fallback</p>
+        </div>
+
+        <span id="haConfigState"
+              class="pill">
+          Chưa kiểm tra
+        </span>
+      </div>
+
+      <div class="ha-enable-row">
+
+        <label class="switch-line">
+          <input id="haEnabled"
+                 type="checkbox">
+          <span>
+            <b>Bật Home Assistant Skill</b>
+            <small>
+              ViPi vẫn hoạt động bình thường khi HA mất kết nối
+            </small>
+          </span>
+        </label>
+
+        <label class="switch-line">
+          <input id="haPreferInternal"
+                 type="checkbox"
+                 checked>
+          <span>
+            <b>Ưu tiên địa chỉ nội bộ</b>
+            <small>
+              LAN trước → địa chỉ ngoài fallback
+            </small>
+          </span>
+        </label>
+
+      </div>
+
+      <div class="form-grid">
+
+        <label class="field">
+          <span>Địa chỉ nội bộ</span>
+          <input id="haInternalUrl"
+                 placeholder="http://192.168.1.10:8123">
+        </label>
+
+        <label class="field">
+          <span>Địa chỉ bên ngoài</span>
+          <input id="haExternalUrl"
+                 placeholder="https://xxxxx.ui.nabu.casa">
+        </label>
+
+        <label class="field token-field">
+          <span>Long-Lived Access Token</span>
+
+          <div class="token-row">
+            <input id="haToken"
+                   type="password"
+                   autocomplete="new-password"
+                   placeholder="Nhập token mới">
+
+            <button type="button"
+                    onclick="toggleHaToken()">
+              Hiện
+            </button>
+          </div>
+
+          <small id="haTokenState">
+            Chưa có token
+          </small>
+        </label>
+
+        <label class="field">
+          <span>Connection timeout</span>
+          <input id="haTimeout"
+                 type="number"
+                 min="2"
+                 max="20"
+                 value="5">
+        </label>
+
+      </div>
+
+      <div class="ha-test-buttons">
+
+        <button onclick="testHa('internal')">
+          Test LAN
+        </button>
+
+        <button onclick="testHa('external')">
+          Test External
+        </button>
+
+        <button onclick="testHa('auto')">
+          Test Auto
+        </button>
+
+        <button class="primary"
+                onclick="saveHa()">
+          Save Config
+        </button>
+
+      </div>
+
+      <div id="haConnectionCard"
+           class="ha-connection neutral">
+
+        <div class="ha-status-icon">
+          ●
+        </div>
+
+        <div>
+          <b id="haConnectionTitle">
+            Chưa kiểm tra kết nối
+          </b>
+
+          <span id="haConnectionText">
+            Nhập địa chỉ và token rồi chọn Test.
+          </span>
+        </div>
+
+      </div>
+
+      <div class="token-security">
+        Token được lưu riêng tại
+        <code>config/secrets.yaml</code>
+        và không được gửi ngược lại trình duyệt.
+      </div>
+
+    </article>
+
+  </section>
+
+</main>
+
+
+<footer>
+  <b>ViPi Team</b>
+  · Developed by
+  <b>HaLong</b>
+  · 2026
+</footer>
+
+<script src="/static/js/config.js?v=20260910-4"></script>
+
+</body>
+</html>

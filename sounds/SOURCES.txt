@@ -1,0 +1,22 @@
+ViPi V2 system sound sources
+============================
+Reference firmware: FutureProofHomes/Satellite1-ESPHome (develop)
+Satellite1 references the Home Assistant Voice PE sound set.
+Source repository: esphome/home-assistant-voice-pe, branch dev, /sounds
+
+Files installed by install/download_sounds.sh and converted to WAV PCM S16LE, mono, 16 kHz:
+jack_connected.wav
+jack_disconnected.wav
+mute_switch_on.wav
+mute_switch_off.wav
+timer_finished.wav
+wake_word_triggered.wav
+center_button_press.wav
+center_button_double_press.wav
+center_button_triple_press.wav
+center_button_long_press.wav
+factory_reset_initiated.wav
+factory_reset_cancelled.wav
+factory_reset_confirmed.wav
+
+Keep upstream attribution/license notices when redistributing these assets.

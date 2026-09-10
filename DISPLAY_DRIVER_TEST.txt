@@ -1,0 +1,2 @@
+Display C++ compile: PASS
+Display logic test: PASS

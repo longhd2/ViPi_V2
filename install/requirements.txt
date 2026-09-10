@@ -1,0 +1,4 @@
+# ViPi V2 server dependencies.
+# Add only dependencies actually required by migrated V1 runtime.
+PyYAML>=6.0
+requests>=2.31

@@ -1,0 +1,16 @@
+[Unit]
+Description=ViPi V2 Voice Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=server
+WorkingDirectory=/home/server/ViPi_V2
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/server/ViPi_V2/.venv/bin/python -m Server.main
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

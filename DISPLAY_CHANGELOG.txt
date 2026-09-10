@@ -1,0 +1,10 @@
+ViPi V2 display revision
+
+- Removed ILI9341.
+- Added SSD1306 128x64 I2C as the default display.
+- Kept ST7789 as the only optional color display.
+- Purple-board defaults: SDA GPIO41, SCL GPIO42.
+- Added Web display type selector.
+- Added conditional OLED/SPI configuration fields.
+- Added NVS key mapping specification.
+- Display remains optional and independent from audio/wake/network.

@@ -1,0 +1,86 @@
+substitutions:
+  name: vipi-v2
+  friendly_name: "ViPi V2"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+  # ViPi V2 APP slot: 0x380000 = 3670016 bytes
+  platformio_options:
+    board_upload.maximum_size: 3670016
+
+  # ViPi V2 APP slot: 0x380000 = 3670016 bytes
+
+  # ViPi V2 APP slot: 0x380000 = 3670016 bytes
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  partitions: partitions.csv
+
+  # ViPi V2 OTA slot = 0x380000 = 3,670,016 bytes.
+  # Keep PlatformIO size reporting aligned with partitions.csv.
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_SR_MN_EN_MULTINET7_QUANT: y
+      CONFIG_SR_MN_EN_NONE: n
+      CONFIG_MBEDTLS_CERTIFICATE_BUNDLE: y
+      CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL: y
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: y
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: y
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_AUDIO_DECODER_AAC_SUPPORT: y
+      CONFIG_AUDIO_SIMPLE_DEC_M4A_SUPPORT: y
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+
+wifi:
+  ap:
+    ssid: "ViPi-V2-Setup"
+    password: "12345678"
+
+captive_portal:
+
+external_components:
+  - source:
+      type: local
+      path: runtime_components
+    components:
+      - vipi_audio
+
+vipi_audio:
+  id: vipi
+
+  # Server ViPi
+  server_ip: "192.168.1.222"
+
+  # Wake
+  command: "bebe"
+  threshold: 0.20
+  wake_record_ms: 6000
+
+  # Microphone
+  mic_ws_pin: 4
+  mic_bclk_pin: 5
+  mic_din_pin: 6
+
+  # Speaker
+  spk_bclk_pin: 15
+  spk_ws_pin: 16
+  spk_dout_pin: 7
+
+  # Purple board
+  # GPIO39 = VOL-
+  # GPIO40 = VOL+
+  # PTT hardware disabled in V2 profile.
+  ptt_pin: -1
+
+  # Built-in LED
+  led_pin: 48

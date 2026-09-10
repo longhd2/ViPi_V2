@@ -1,0 +1,17 @@
+server:
+  name: ViPi Server
+  admin_host: 0.0.0.0
+  admin_port: 8090
+weather:
+  location_name: Tam Kỳ
+  latitude: 15.57364
+  longitude: 108.47403
+  timezone: Asia/Ho_Chi_Minh
+  forecast_days: 7
+  rain_threshold: 50
+home_assistant:
+  enabled: true
+  internal_url: http://192.168.1.11:8123
+  external_url: http://longhd.duckdns.org:8123
+  prefer_internal: true
+  timeout: 5

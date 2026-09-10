@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ViPi Console</title>
+<link rel="stylesheet" href="/static/css/dashboard.css?v=20260910-4">
+<link rel="stylesheet" href="/static/css/console.css?v=20260910-4">
+</head>
+
+<body>
+
+<header class="top">
+
+  <div class="brand">
+
+    <div class="mark">
+      <img src="/static/img/vipi-logo.png" alt="ViPi">
+    </div>
+
+    <div>
+      <h1>ViPi Server V2</h1>
+      <p>Web Console</p>
+    </div>
+
+  </div>
+
+  <nav class="main-nav">
+    <a href="/">Dashboard</a>
+    <a href="/config">Config</a>
+    <a class="active" href="/console">&gt;_ Console</a>
+  </nav>
+
+</header>
+
+
+<main class="console-wrap">
+
+  <article class="card console-card">
+
+    <div class="console-title">
+
+      <div>
+        <h2>ViPi Web Console</h2>
+        <p>Restricted administrative console</p>
+      </div>
+
+      <span class="safe-badge">
+        SAFE MODE
+      </span>
+
+    </div>
+
+
+    <div class="quick">
+
+      <button onclick="run('vipi status')">
+        Status
+      </button>
+
+      <button onclick="run('vipi ports')">
+        Ports
+      </button>
+
+      <button onclick="run('vipi memory')">
+        Memory
+      </button>
+
+      <button onclick="run('vipi disk')">
+        Disk
+      </button>
+
+      <button onclick="run('vipi uptime')">
+        Uptime
+      </button>
+
+      <button onclick="run('vipi ip')">
+        IP
+      </button>
+
+      <button class="primary"
+              onclick="run('vipi restart')">
+        Restart ViPi
+      </button>
+
+    </div>
+
+
+    <pre id="terminal"
+         class="web-terminal">ViPi Web Console
+Gõ "help" để xem các lệnh được phép.
+
+server@vipi:~$ </pre>
+
+
+    <form id="commandForm"
+          class="command-line">
+
+      <span>server@vipi:~$</span>
+
+      <input id="command"
+             autocomplete="off"
+             spellcheck="false"
+             autofocus
+             placeholder="vipi status">
+
+      <button class="primary">
+        Run
+      </button>
+
+    </form>
+
+  </article>
+
+</main>
+
+
+<footer>
+  <b>ViPi Team</b>
+  · Developed by
+  <b>HaLong</b>
+  · 2026
+</footer>
+
+<script src="/static/js/console.js?v=20260910-4"></script>
+
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "project": "ViPi_V2",
+  "parallel_to": "/home/server/ViPi",
+  "install_path": "/home/server/ViPi_V2",
+  "llm": false,
+  "llm_fallback": false,
+  "pipeline": [
+    "STT",
+    "UnderstandingEngine",
+    "SkillRegistry",
+    "TTS"
+  ],
+  "client": {
+    "modules": [
+      "core",
+      "audio",
+      "sounds",
+      "led",
+      "touch",
+      "wake",
+      "network",
+      "web",
+      "ota"
+    ],
+    "touch_buttons": 4,
+    "dynamic_led_count": true,
+    "single_i2s_owner": true
+  }
+}

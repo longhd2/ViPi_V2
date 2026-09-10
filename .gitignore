@@ -1,0 +1,62 @@
+# ============================================================
+# ViPi V2 - generated/private/runtime files
+# ============================================================
+
+# ESPHome / ESP-IDF build
+Client/.esphome/
+Client/build/
+Client/.pioenvs/
+Client/.piolibdeps/
+
+# Firmware/build outputs
+Client/*.elf
+Client/*.bin
+Client/*.map
+Client/*.hex
+
+# Python generated environments/cache
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+**/env/
+
+# Server runtime cache
+Server/cache/
+cache/
+logs/
+*.log
+*.pid
+*.tmp
+
+# Runtime state - regenerated automatically
+Server/data/clients.json
+Server/data/scheduler.json
+
+# Secrets
+Server/config/secrets.yaml
+**/.env
+**/.env.*
+**/*credential*
+**/*credentials*
+
+# Development backups
+backups/
+backup*/
+Client/backup/
+_v1_source/
+**/*.bak
+**/*.bak_*
+**/*.before-*
+**/*.before_*
+**/*.before_v2_*
+Client/runtime_components/vipi_audio.before_optional_ptt/
+
+# Accidental temporary command files
+Server/\[*\]
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

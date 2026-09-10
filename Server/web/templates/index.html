@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ViPi Server V2</title>
+<link rel="stylesheet" href="/static/css/dashboard.css?v=20260910-2">
+</head>
+
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="mark">
+      <img src="/static/img/vipi-logo.png"
+           alt="ViPi"
+           onerror="this.style.display='none';this.parentElement.innerHTML='VP'">
+    </div>
+
+    <div>
+      <h1>ViPi Server V2</h1>
+      <p>Local Voice Assistant · NO LLM</p>
+    </div>
+  </div>
+
+  <nav class="main-nav">
+    <a class="active" href="/">Dashboard</a>
+    <a href="/config">Config</a>
+    <a href="/console">&gt;_ Console</a>
+  </nav>
+
+  <div id="serverBadge" class="badge">● ONLINE</div>
+</header>
+
+
+<main class="dashboard">
+
+  <!-- LEFT 2/3 -->
+  <section class="left-panel">
+
+    <div class="metrics">
+
+      <article class="card metric">
+        <span>INTERNET</span>
+        <strong id="internet">...</strong>
+        <small id="latency">Đang kiểm tra</small>
+      </article>
+
+      <article class="card metric">
+        <span>CPU</span>
+        <strong id="cpu">--%</strong>
+        <small id="temp">-- °C</small>
+      </article>
+
+      <article class="card metric">
+        <span>MEMORY</span>
+        <strong id="ram">--%</strong>
+        <small id="ramText">--</small>
+      </article>
+
+      <article class="card metric">
+        <span>STORAGE</span>
+        <strong id="disk">--%</strong>
+        <small id="diskText">--</small>
+      </article>
+
+    </div>
+
+
+    <div class="server-client-grid">
+
+      <!-- SERVER -->
+      <article class="card">
+
+        <div class="card-title">
+          <div>
+            <h2>ViPi Server</h2>
+            <p>Voice Engine</p>
+          </div>
+
+          <span id="hostname" class="pill">server</span>
+        </div>
+
+        <div class="info-grid">
+
+          <div>
+            <span>IP LAN</span>
+            <b id="lanIp">--</b>
+          </div>
+
+          <div>
+            <span>UPTIME</span>
+            <b id="uptime">--</b>
+          </div>
+
+          <div>
+            <span>CPU CORES</span>
+            <b id="cores">--</b>
+          </div>
+
+          <div>
+            <span>LOAD</span>
+            <b id="load">--</b>
+          </div>
+
+        </div>
+
+        <div class="service-row">
+
+          <button class="primary"
+                  onclick="control('vipi-server','restart')">
+            Restart ViPi
+          </button>
+
+          <button onclick="control('vipi-server','stop')">
+            Stop
+          </button>
+
+          <button onclick="control('vipi-server','start')">
+            Start
+          </button>
+
+        </div>
+
+        <pre id="supervisorStatus"
+             class="statusbox">Đang đọc Supervisor...</pre>
+
+      </article>
+
+
+      <!-- CLIENTS -->
+      <article class="card">
+
+        <div class="card-title">
+          <div>
+            <h2>ViPi Clients</h2>
+            <p>ESP32 Voice Satellites</p>
+          </div>
+
+          <span id="clientCount"
+                class="pill">0 online</span>
+        </div>
+
+        <div id="clients"
+             class="clients">
+
+          <div class="empty">
+            Đang chờ Client...
+          </div>
+
+        </div>
+
+      </article>
+
+    </div>
+
+
+    <!-- SERVICES -->
+    <article class="card services-card">
+
+      <div class="card-title">
+        <div>
+          <h2>ViPi Services</h2>
+          <p>Trạng thái hệ thống</p>
+        </div>
+      </div>
+
+      <div class="service-status-grid">
+
+        <div>
+          <i class="dot green"></i>
+          <section>
+            <b>STT</b>
+            <small>Port 8100</small>
+          </section>
+        </div>
+
+        <div>
+          <i class="dot green"></i>
+          <section>
+            <b>Scheduler</b>
+            <small>Running</small>
+          </section>
+        </div>
+
+        <div>
+          <i class="dot green"></i>
+          <section>
+            <b>Media</b>
+            <small>Port 8088</small>
+          </section>
+        </div>
+
+        <div id="haServiceCard">
+          <i id="haServiceDot"
+             class="dot gray"></i>
+          <section>
+            <b>Home Assistant</b>
+            <small id="haServiceText">
+              Đang kiểm tra...
+            </small>
+          </section>
+        </div>
+
+      </div>
+
+    </article>
+
+  </section>
+
+
+  <!-- RIGHT 1/3 -->
+  <aside class="right-panel">
+
+    <article class="card log-card">
+
+      <div class="log-head">
+
+        <div>
+          <h2>Live Logs</h2>
+          <p>Realtime server activity</p>
+        </div>
+
+        <div class="log-tools">
+
+          <select id="logService"
+                  onchange="loadLogs()">
+
+            <option value="vipi-server">
+              ViPi Server
+            </option>
+
+            <option value="vipi-web">
+              Web Admin
+            </option>
+
+          </select>
+
+          <button onclick="loadLogs()">
+            ↻
+          </button>
+
+        </div>
+
+      </div>
+
+      <pre id="logs"
+           class="terminal">Đang tải log...</pre>
+
+      <div class="log-bottom">
+        <span>● Live</span>
+        <span>Refresh 5s</span>
+      </div>
+
+    </article>
+
+  </aside>
+
+</main>
+
+
+<footer>
+  <b>ViPi Team</b>
+  · Developed by
+  <b>HaLong</b>
+  · 2026
+</footer>
+
+<script src="/static/js/dashboard.js?v=20260910-2"></script>
+
+</body>
+</html>
