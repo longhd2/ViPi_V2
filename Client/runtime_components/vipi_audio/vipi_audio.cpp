@@ -294,14 +294,10 @@ void ViPiAudio::loop() {
 
     if (wifi_connected) {
       ESP_LOGI(TAG, "WiFi connected");
-      vipi_play_system_sound(
-          "wifi_connected.wav",
-          volume_);
+      // Wi-Fi connection notification is intentionally silent.
     } else {
       ESP_LOGW(TAG, "WiFi disconnected");
-      vipi_play_system_sound(
-          "disconnected.wav",
-          volume_);
+      // Wi-Fi disconnection notification is intentionally silent.
     }
   }
 
@@ -458,10 +454,7 @@ void ViPiAudio::setup() {
 
   vipi_init_sound_manager();
 
-  // Local startup sound. Does not depend on Server or Home Assistant.
-  vipi_play_system_sound(
-      "startup.wav",
-      volume_);
+  // Startup is intentionally silent.
 
   wifi_was_connected_ = network::is_connected();
   wifi_state_initialized_ = true;
@@ -2512,7 +2505,7 @@ void ViPiAudio::music_task_() {
         ViPiLedState::MUSIC);
 
     wake_stream=false;
-    set_led_(true);
+    set_led_(false);
 
     media_user_stop = false;
 

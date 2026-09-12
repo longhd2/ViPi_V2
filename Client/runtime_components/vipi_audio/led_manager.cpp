@@ -237,7 +237,7 @@ void ViPiLedManager::choose_effect() {
 
     case ViPiLedState::MUSIC:
       effect_ =
-          ViPiLedEffect::RAINBOW;
+          ViPiLedEffect::NONE;
       break;
 
     case ViPiLedState::VOLUME:
@@ -932,6 +932,14 @@ void ViPiLedManager::update() {
   }
 
   last_update_ms_ = now;
+
+  // Volume is only a temporary overlay.
+  // After 1.5s return to the effect of the current state.
+  if (effect_ == ViPiLedEffect::VOLUME_DISPLAY &&
+      (now - effect_started_ms_) >= 1500) {
+    choose_effect();
+    effect_started_ms_ = now;
+  }
 
   render(now);
   show();

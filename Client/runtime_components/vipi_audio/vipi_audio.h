@@ -24,6 +24,18 @@ class ViPiAudio : public Component {
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
  protected:
+  enum class MediaCommand : uint8_t {
+    NONE,
+    PLAY,
+    STOP,
+    PAUSE,
+    RESUME,
+    NEXT,
+    PREV
+  };
+
+  std::atomic<MediaCommand> media_command_pending_{MediaCommand::NONE};
+
   static void audio_task_entry_(void *);
   static void tcp_task_entry_(void *);
   static void music_task_entry_(void *);
@@ -32,6 +44,7 @@ class ViPiAudio : public Component {
   void music_task_();
   void request_music_(const std::string &url, const std::string &format);
   void stop_music_();
+  void media_command_(MediaCommand command);
   void handle_buttons_();
   void change_volume_(int delta);
   void action_button_();

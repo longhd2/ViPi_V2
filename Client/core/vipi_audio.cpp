@@ -106,6 +106,15 @@ static srmodel_list_t *models = nullptr;
 static esp_mn_iface_t *mn = nullptr;
 static model_iface_data_t *mn_data = nullptr;
 
+enum class ViPiMediaState : uint8_t {
+  IDLE,
+  PLAYING,
+  PAUSED,
+  STOPPING
+};
+
+static volatile ViPiMediaState media_state = ViPiMediaState::IDLE;
+
 static volatile bool playing = false;
 static volatile bool wake_stream = false;
 static volatile uint32_t wake_until = 0;
@@ -457,12 +466,13 @@ void ViPiAudio::change_volume_(int delta) {
 }
 
 void ViPiAudio::action_button_() {
-    if (playing) {
+    if (media_state == ViPiMediaState::PLAYING ||
+        media_state == ViPiMediaState::PAUSED) {
         ESP_LOGI(
             TAG,
             "ACTION: stop current playback");
 
-        music_stop_ = true;
+        media_command_(MediaCommand::STOP);
         return;
     }
 
@@ -551,7 +561,8 @@ void ViPiAudio::audio_task_() {
       }
       inet_pton(AF_INET, server_ip_.c_str(), &dst.sin_addr);
       sendto(udp_sock, ulaw, chunk, 0, (sockaddr*)&dst, sizeof(dst));
-    } else if (!playing) {
+    } else if (!playing ||
+               media_state == ViPiMediaState::PLAYING) {
       esp_mn_state_t state=mn->detect(mn_data, pcm);
       if (state==ESP_MN_STATE_DETECTED) {
         esp_mn_results_t *r=mn->get_results(mn_data);
@@ -561,7 +572,7 @@ void ViPiAudio::audio_task_() {
         ESP_LOGI(TAG, "====================================");
         // Neu music dang chay, dung no truoc de SYSTEM lay I2S.
         // Buoc sau se nang cap thanh pause + resume dung vi tri.
-        if (playing) {
+        if (media_state == ViPiMediaState::PLAYING) {
           // Luu vi tri truoc khi nhuong speaker cho wake/TTS.
           if (media_resume_ctx.valid) {
             uint32_t elapsed =
@@ -579,11 +590,11 @@ void ViPiAudio::audio_task_() {
                     media_resume_ctx.position_ms);
           }
 
-          music_stop_ = true;
+          media_command_(MediaCommand::PAUSE);
 
           uint32_t wait_start = millis();
 
-          while (playing &&
+          while (media_state == ViPiMediaState::PLAYING &&
                  (millis() - wait_start) < 2000) {
             vTaskDelay(pdMS_TO_TICKS(10));
           }
@@ -714,39 +725,12 @@ void ViPiAudio::tcp_task_() {
     vipi_audio_manager.release(
         ViPiAudioManager::Owner::TTS);
 
-    // TTS da ket thuc. Neu media chi bi assistant tam dung,
-    // queue lai media sau khi TTS da release speaker.
+    // TTS finished: return media control to the central controller.
     if (media_resume_after_tts &&
         media_resume_ctx.valid &&
         !media_user_stop) {
-
       media_resume_after_tts = false;
-
-      std::string resume_url =
-          media_resume_ctx.url;
-
-      const char separator =
-          resume_url.find('?') == std::string::npos
-              ? '?'
-              : '&';
-
-      resume_url += separator;
-      resume_url += "vipi_position_ms=";
-      resume_url += std::to_string(
-          media_resume_ctx.position_ms);
-
-      music_url_ = resume_url;
-      music_format_ = media_resume_ctx.format;
-
-      media_resume_ctx.interrupted_by_assistant = false;
-
-      music_pending_ = true;
-
-      ESP_LOGI(
-          TAG,
-          "MEDIA resume queued at %lu ms",
-          (unsigned long)
-              media_resume_ctx.position_ms);
+      media_command_(MediaCommand::RESUME);
     }
 
     close(c);
@@ -1583,21 +1567,84 @@ void ViPiAudio::request_music_(const std::string &url, const std::string &format
   media_user_stop = true;
   clear_media_resume_context();
   media_user_stop = false;
-  music_stop_ = true;
-  vTaskDelay(pdMS_TO_TICKS(30));
+  if (media_state != ViPiMediaState::IDLE) {
+    media_command_(MediaCommand::STOP);
+
+    uint32_t wait_start = millis();
+    while (media_state != ViPiMediaState::IDLE &&
+           (millis() - wait_start) < 2000) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    if (media_state != ViPiMediaState::IDLE) {
+      ESP_LOGE(TAG, "MEDIA previous session did not stop");
+      return;
+    }
+  }
+
   music_url_ = url;
   music_format_ = format.empty() ? "mp3" : format;
   std::transform(music_format_.begin(), music_format_.end(), music_format_.begin(), ::tolower);
-  music_stop_ = false;
-  music_pending_ = true;
+  media_command_(MediaCommand::PLAY);
   ESP_LOGI(TAG, "MUSIC queued format=%s url=%.100s", music_format_.c_str(), url.c_str());
+}
+
+void ViPiAudio::media_command_(MediaCommand command) {
+  media_command_pending_.store(command);
+
+  switch (command) {
+    case MediaCommand::PLAY:
+      music_stop_ = false;
+      music_pending_ = true;
+      break;
+
+    case MediaCommand::STOP:
+      media_state = ViPiMediaState::STOPPING;
+      music_stop_ = true;
+      music_pending_ = false;
+      break;
+
+    case MediaCommand::PAUSE:
+      if (media_state == ViPiMediaState::PLAYING) {
+        media_state = ViPiMediaState::PAUSED;
+        music_stop_ = true;
+      }
+      break;
+
+    case MediaCommand::RESUME:
+      if (media_state == ViPiMediaState::PAUSED &&
+          media_resume_ctx.valid &&
+          !media_user_stop) {
+        std::string resume_url = media_resume_ctx.url;
+
+        const char separator =
+            resume_url.find('?') == std::string::npos ? '?' : '&';
+
+        resume_url += separator;
+        resume_url += "vipi_position_ms=";
+        resume_url += std::to_string(media_resume_ctx.position_ms);
+
+        music_url_ = resume_url;
+        music_format_ = media_resume_ctx.format;
+        media_resume_ctx.interrupted_by_assistant = false;
+
+        music_stop_ = false;
+        music_pending_ = true;
+
+        ESP_LOGI(TAG, "MEDIA resume queued at %lu ms",
+                 (unsigned long)media_resume_ctx.position_ms);
+      }
+      break;
+
+    default:
+      break;
+  }
 }
 
 void ViPiAudio::stop_music_() {
   media_user_stop = true;
   clear_media_resume_context();
-  music_stop_ = true;
-  music_pending_ = false;
+  media_command_(MediaCommand::STOP);
 }
 
 esp_err_t ViPiAudio::web_music_play_(httpd_req_t *req) {
@@ -1692,13 +1739,15 @@ void ViPiAudio::music_task_() {
     std::string fmt=music_format_;
     auto dtype=music_type_from_format(fmt);
     music_stop_=false;
-    playing=true;
+    media_state = ViPiMediaState::PLAYING;
 
+    // Media does not own the assistant "playing" flag.
+    // Keep microphone/wake-word detection active during media playback.
     vipi_led_manager.set_state(
         ViPiLedState::MUSIC);
 
     wake_stream=false;
-    set_led_(true);
+    set_led_(false);
 
     media_user_stop = false;
 
@@ -1734,7 +1783,8 @@ void ViPiAudio::music_task_() {
     if(!h || esp_http_client_open(h,0)!=ESP_OK){
       ViPiDiagnostics::error("HTTP", "OPEN FAILED");
       ESP_LOGE(TAG,"MUSIC HTTP open failed"); if(h)esp_http_client_cleanup(h);
-      playing=false; set_led_(false); continue;
+    media_state = ViPiMediaState::IDLE;
+      set_led_(false); continue;
     }
     int64_t content_len = esp_http_client_fetch_headers(h);
     int http_status = esp_http_client_get_status_code(h);
@@ -1788,7 +1838,8 @@ void ViPiAudio::music_task_() {
     if(derr!=ESP_AUDIO_ERR_OK || !dec){
       ViPiDiagnostics::error("CODEC", "decoder OPEN FAILED");
       ESP_LOGE(TAG,"MUSIC decoder open failed format=%s ret=%d",fmt.c_str(),(int)derr);
-      esp_http_client_close(h); esp_http_client_cleanup(h); playing=false; set_led_(false); continue;
+    media_state = ViPiMediaState::IDLE;
+      esp_http_client_close(h); esp_http_client_cleanup(h); set_led_(false); continue;
     }
 
     // ===== VIPI FIXED I2S 16KHZ =====
@@ -1859,6 +1910,19 @@ void ViPiAudio::music_task_() {
     bool first_input_logged = false;
     bool first_pcm_logged = false;
 
+    // MEDIA phai chiem quyen speaker truoc khi ghi I2S.
+    if (!vipi_audio_manager.acquire(
+            ViPiAudioManager::Owner::MEDIA,
+            portMAX_DELAY)) {
+      ESP_LOGE(TAG, "MUSIC cannot acquire AudioManager");
+      esp_audio_simple_dec_close(dec);
+      esp_http_client_close(h);
+      esp_http_client_cleanup(h);
+    media_state = ViPiMediaState::IDLE;
+            set_led_(false);
+      continue;
+    }
+
     while(!music_stop_){
       int n=esp_http_client_read(h,(char*)in,IN_SIZE);
 
@@ -1877,8 +1941,11 @@ void ViPiAudio::music_task_() {
         if(!esp_http_client_is_complete_data_received(h)){ vTaskDelay(pdMS_TO_TICKS(10)); continue; }
         break;
       }
-      esp_audio_simple_dec_raw_t raw={}; raw.buffer=in; raw.len=n; raw.eos=false;
-      while(raw.len>0 && !music_stop_){
+      esp_audio_simple_dec_raw_t raw={};
+      raw.buffer=in;
+      raw.len=n;
+      raw.eos=music_stop_;
+      while(raw.len>0){
         esp_audio_simple_dec_out_t frame={}; frame.buffer=out; frame.len=out_cap;
         static bool first_process_log=true;
         if(first_process_log){
@@ -1958,36 +2025,85 @@ void ViPiAudio::music_task_() {
 
           for(int i=0;i<samples;i++){
             int32_t scaled=(int32_t)(((int64_t)out16[i]*vol)/20);
-            int32_t v=scaled << 16;
+            int64_t v64=(int64_t)scaled * 65536LL;
+            if(v64 > 2147483647LL) v64 = 2147483647LL;
+            if(v64 < -2147483648LL) v64 = -2147483648LL;
+            int32_t v=(int32_t)v64;
             stereo[i*2]=v;
             stereo[i*2+1]=v;
           }
 
           size_t wr=0;
           size_t want=samples*2*sizeof(int32_t);
-          esp_err_t iw=i2s_channel_write(tx_chan,stereo,want,&wr,portMAX_DELAY);
-          if(iw!=ESP_OK || wr!=want){
+          bool iw_ok=vipi_audio_manager.write(
+              ViPiAudioManager::Owner::MEDIA,
+              stereo,
+              want,
+              &wr,
+              portMAX_DELAY);
+          if(!iw_ok || wr!=want){
             ESP_LOGW(TAG,
-              "MUSIC I2S WRITE iw=%d wr=%u want=%u samples=%d hz=%u",
-              (int)iw,(unsigned)wr,(unsigned)want,samples,
+              "MUSIC I2S WRITE ok=%d wr=%u want=%u samples=%d hz=%u",
+              (int)iw_ok,(unsigned)wr,(unsigned)want,samples,
               (unsigned)info.sample_rate);
           }
         }
         if(raw.consumed<=0){ break; }
-        raw.len-=raw.consumed; raw.buffer+=raw.consumed;
+        raw.len-=raw.consumed;
+        raw.buffer+=raw.consumed;
+
+        if (music_stop_) {
+          raw.eos = true;
+        }
       }
       if(failed) break;
     }
+
+    // If playback was interrupted by STOP/PAUSE, reset decoder/parser
+    // only after the decode loop has completely stopped.
+    if (music_stop_) {
+      esp_audio_err_t rret = esp_audio_simple_dec_reset(dec);
+      ESP_LOGI(TAG, "MEDIA decoder reset ret=%d", (int)rret);
+    }
+
     esp_audio_simple_dec_close(dec);
-    esp_http_client_close(h); esp_http_client_cleanup(h);
-    // Drain a short silent tail. I2S clock stays at 16kHz.
+    esp_http_client_close(h);
+    esp_http_client_cleanup(h);
+
     int32_t z[640]={0};
     size_t wr=0;
-    i2s_channel_write(tx_chan,z,sizeof(z),&wr,portMAX_DELAY);
+    vipi_audio_manager.write(
+        ViPiAudioManager::Owner::MEDIA,
+        z,
+        sizeof(z),
+        &wr,
+        portMAX_DELAY);
 
-    playing=false;
-    set_led_(false);
+    vipi_audio_manager.release(
+        ViPiAudioManager::Owner::MEDIA);
+
+    // Flush I2S/DMA tail after interrupted media playback.
+    // Do not disable/reconfigure I2S; just overwrite pending DMA with silence.
+    if (music_stop_) {
+      int32_t flush_zero[1600] = {0};  // ~50 ms stereo 16 kHz
+      size_t flush_wr = 0;
+      i2s_channel_write(
+          tx_chan,
+          flush_zero,
+          sizeof(flush_zero),
+          &flush_wr,
+          portMAX_DELAY);
+      ESP_LOGI(TAG, "MEDIA I2S DMA silence flush bytes=%u",
+               (unsigned)flush_wr);
+    }
+
+    if (media_state != ViPiMediaState::PAUSED) {
+      media_state = ViPiMediaState::IDLE;
+    }
+
+        set_led_(false);
     music_stop_=false;
+    media_command_pending_.store(MediaCommand::NONE);
     ESP_LOGI(TAG,"MUSIC DIRECT end format=%s%s",fmt.c_str(),failed?" ERROR":"");
   }
 }
